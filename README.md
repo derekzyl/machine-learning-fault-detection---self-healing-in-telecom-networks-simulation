@@ -1,6 +1,6 @@
 # 🛡️ ML Fault Detection & Self-Healing in Telecom Networks
 
-> **MSc Thesis Simulation** · Peters PG/2415890  
+> **MSc Thesis Simulation** · 
 > A full-stack research pipeline for proactive fault detection and autonomous self-healing in 5G NR radio access networks, combining NS-3 network simulation with machine-learning classifiers guided by the MAPE-K autonomic control loop.
 
 ---
