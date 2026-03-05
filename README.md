@@ -451,7 +451,7 @@ python3 check_environment.py
 
 This simulation was developed as part of an MSc research thesis investigating autonomous network management in 5G environments. All simulation code, ML models, and evaluation methodology are original work.
 
-**Author**: Peters PG/2415890  
+ 
 **Simulation Engine**: NS-3 Network Simulator v3.38  
 **ML Framework**: TensorFlow/Keras 2.15, scikit-learn 1.5  
 
