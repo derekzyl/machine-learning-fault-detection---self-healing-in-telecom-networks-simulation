@@ -286,7 +286,8 @@ def train_rf(splits):
     t0 = time.time()
     rf.fit(splits['X_tab_train'], splits['y_tab_train'])
     print(f"  Training time: {time.time()-t0:.1f}s")
-    print(f"  OOB Score: {rf.oob_score_:.4f}")
+    oob = getattr(rf, 'oob_score_', None) or getattr(rf, 'oob_score', None)
+    if oob: print(f'  OOB Score: {oob:.4f}')
 
     y_pred = rf.predict(splits['X_tab_test'])
     y_prob = rf.predict_proba(splits['X_tab_test'])
@@ -467,6 +468,7 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--data",     default=DEFAULT_DATA)
     parser.add_argument("--skip_svm", action='store_true')
+    parser.add_argument("--skip_rf",  action='store_true')
     args = parser.parse_args()
 
     print("\n" + "="*55)
@@ -478,7 +480,11 @@ def main():
     X_seq, y, meta = make_windows(df)
     splits = prepare_splits(X_seq, y)
 
-    rf,   rf_pred,   rf_prob   = train_rf(splits)
+    if not args.skip_rf:
+        rf, rf_pred, rf_prob = train_rf(splits)
+    else:
+        print("\n  Skipping RF (--skip_rf flag set)")
+        rf, rf_pred, rf_prob = None, None, None
     lstm, lstm_pred, lstm_prob = train_lstm(splits)
 
     if not args.skip_svm:
