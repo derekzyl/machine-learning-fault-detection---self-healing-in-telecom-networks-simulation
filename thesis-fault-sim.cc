@@ -1,6 +1,6 @@
 /* =============================================================================
  * THESIS FAULT SIMULATION — NS-3 3.38 COMPATIBLE VERSION
- * Peters PG/2415890
+ * 
  *
  * FILE:  thesis-fault-sim.cc
  * PLACE: ~/ns-3.38/scratch/thesis-fault-sim.cc

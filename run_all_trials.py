@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 THESIS SIMULATION — STEP 2: RUN ALL 50 TRIALS
-Peters PG/2415890
+Peters
 
 USAGE:
   python3 run_all_trials.py                        # all 50 trials
@@ -10,37 +10,46 @@ USAGE:
   python3 run_all_trials.py --fault power          # one fault type only
 """
 
-import subprocess, os, sys, time, argparse
-import pandas as pd
+import argparse
+import os
+import subprocess
+import sys
+import time
 from concurrent.futures import ProcessPoolExecutor, as_completed
 
-NS3_DIR    = os.path.expanduser("~/ns-3.38")
+import pandas as pd
+
+NS3_DIR = os.path.expanduser("~/ns-3.38")
 SIM_SCRIPT = "thesis-fault-sim"
 OUTPUT_DIR = os.path.expanduser("~/thesis-sim/output/raw")
 MERGED_CSV = os.path.expanduser("~/thesis-sim/output/kpi_master_dataset.csv")
-N_TRIALS   = 50
+N_TRIALS = 50
 FAULT_TYPES = ["none", "power", "congestion", "hardware"]
 
 # Global flag — set from args
 DEBUG = False
 
+
 def run_trial(args):
     trial, fault, output_dir = args
-    cmd = [f"{NS3_DIR}/ns3", "run",
-           f"{SIM_SCRIPT} --trial={trial} --fault={fault} --outputDir={output_dir}"]
+    cmd = [
+        f"{NS3_DIR}/ns3",
+        "run",
+        f"{SIM_SCRIPT} --trial={trial} --fault={fault} --outputDir={output_dir}",
+    ]
     t0 = time.time()
     try:
         result = subprocess.run(
-            cmd, cwd=NS3_DIR,
-            capture_output=True, text=True, timeout=600)
+            cmd, cwd=NS3_DIR, capture_output=True, text=True, timeout=600
+        )
         elapsed = time.time() - t0
 
         if result.returncode != 0:
             # NS-3 writes errors to stdout AND stderr — combine both
             combined = (result.stdout + "\n" + result.stderr).strip()
-            lines = [l for l in combined.split('\n') if l.strip()]
+            lines = [l for l in combined.split("\n") if l.strip()]
             # Show last 5 meaningful lines
-            snippet = ' | '.join(lines[-5:]) if lines else '(no output)'
+            snippet = " | ".join(lines[-5:]) if lines else "(no output)"
             print(f"  [FAIL] trial={trial} fault={fault}\n         {snippet}")
             return (trial, fault, False, elapsed)
 
@@ -56,18 +65,21 @@ def run_trial(args):
 
 def debug_single_trial():
     """Run one trial in foreground showing full NS-3 output. Use to diagnose failures."""
-    print("\n" + "="*60)
+    print("\n" + "=" * 60)
     print("  DEBUG MODE — running trial=0 fault=none")
     print("  Showing full NS-3 output...")
-    print("="*60 + "\n")
+    print("=" * 60 + "\n")
 
     os.makedirs(OUTPUT_DIR, exist_ok=True)
-    cmd = [f"{NS3_DIR}/ns3", "run",
-           f"{SIM_SCRIPT} --trial=0 --fault=none --outputDir={OUTPUT_DIR}"]
+    cmd = [
+        f"{NS3_DIR}/ns3",
+        "run",
+        f"{SIM_SCRIPT} --trial=0 --fault=none --outputDir={OUTPUT_DIR}",
+    ]
 
     result = subprocess.run(cmd, cwd=NS3_DIR, text=True)  # no capture — prints live
 
-    print("\n" + "="*60)
+    print("\n" + "=" * 60)
     print(f"  Return code: {result.returncode}")
     csv = os.path.join(OUTPUT_DIR, "kpi_trial0_none.csv")
     if os.path.exists(csv):
@@ -84,17 +96,20 @@ def debug_single_trial():
             print("  CSV is EMPTY — NS-3 crashed before writing any data")
     else:
         print("  CSV NOT CREATED — NS-3 crashed before opening output file")
-    print("="*60 + "\n")
+    print("=" * 60 + "\n")
     return result.returncode == 0
 
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--trials",  type=int, default=N_TRIALS)
+    parser.add_argument("--trials", type=int, default=N_TRIALS)
     parser.add_argument("--workers", type=int, default=2)
-    parser.add_argument("--fault",   type=str, default=None)
-    parser.add_argument("--debug",   action='store_true',
-                        help="Run one trial in foreground to see full error output")
+    parser.add_argument("--fault", type=str, default=None)
+    parser.add_argument(
+        "--debug",
+        action="store_true",
+        help="Run one trial in foreground to see full error output",
+    )
     args = parser.parse_args()
 
     os.makedirs(OUTPUT_DIR, exist_ok=True)
@@ -108,7 +123,9 @@ def main():
             print("  1. thesis-fault-sim.cc has a C++ compile error")
             print("     Fix: check ~/ns-3.38/scratch/thesis-fault-sim.cc")
             print("  2. NS-3 module missing (e.g. LTE not built)")
-            print("     Fix: cd ~/ns-3.38 && ./ns3 configure --enable-modules=lte,... && ./ns3 build")
+            print(
+                "     Fix: cd ~/ns-3.38 && ./ns3 configure --enable-modules=lte,... && ./ns3 build"
+            )
             print("  3. Wrong NS-3 version")
             print("     Fix: ls ~/ns-3.38/src/ | grep lte")
         sys.exit(0 if ok else 1)
@@ -116,18 +133,21 @@ def main():
     fault_list = [args.fault] if args.fault else FAULT_TYPES
     total_runs = args.trials * len(fault_list)
 
-    print(f"\n{'='*60}")
-    print(f"  THESIS NS-3 SIMULATION RUNNER")
+    print(f"\n{'=' * 60}")
+    print("  THESIS NS-3 SIMULATION RUNNER")
     print(f"  Trials: {args.trials}  |  Fault types: {fault_list}")
     print(f"  Total runs: {total_runs}  |  Workers: {args.workers}")
     print(f"  Output: {OUTPUT_DIR}")
-    print(f"{'='*60}\n")
+    print(f"{'=' * 60}\n")
 
     # ── Build ───────────────────────────────────────────────────────────────
     print("[1] Building NS-3 simulation script...")
     build = subprocess.run(
         [f"{NS3_DIR}/ns3", "build", SIM_SCRIPT],
-        cwd=NS3_DIR, capture_output=True, text=True)
+        cwd=NS3_DIR,
+        capture_output=True,
+        text=True,
+    )
     if build.returncode != 0:
         print(f"BUILD FAILED:\n{build.stdout}\n{build.stderr}")
         print("\nMake sure thesis-fault-sim.cc is in ~/ns-3.38/scratch/")
@@ -136,12 +156,17 @@ def main():
 
     # ── Quick sanity check before launching all workers ────────────────────
     print("[1b] Quick sanity check (1 trial before launching all workers)...")
-    test_cmd = [f"{NS3_DIR}/ns3", "run",
-                f"{SIM_SCRIPT} --trial=0 --fault=none --outputDir={OUTPUT_DIR}"]
-    test = subprocess.run(test_cmd, cwd=NS3_DIR, capture_output=True, text=True, timeout=120)
+    test_cmd = [
+        f"{NS3_DIR}/ns3",
+        "run",
+        f"{SIM_SCRIPT} --trial=0 --fault=none --outputDir={OUTPUT_DIR}",
+    ]
+    test = subprocess.run(
+        test_cmd, cwd=NS3_DIR, capture_output=True, text=True, timeout=120
+    )
     if test.returncode != 0:
         combined = (test.stdout + "\n" + test.stderr).strip()
-        print(f"  SANITY CHECK FAILED. Full output:")
+        print("  SANITY CHECK FAILED. Full output:")
         print(combined[-2000:])
         print("\n  Run with --debug for full live output:")
         print("  python3 run_all_trials.py --debug")
@@ -170,8 +195,10 @@ def main():
             if not success:
                 failed += 1
             eta = (time.time() - t_start) / completed * (total_runs - completed)
-            print(f"  [{completed:3d}/{total_runs}] trial={trial:2d} fault={fault:12s} "
-                  f"{'OK' if success else 'FAIL'} {elapsed:5.1f}s | ETA {eta/60:.1f} min")
+            print(
+                f"  [{completed:3d}/{total_runs}] trial={trial:2d} fault={fault:12s} "
+                f"{'OK' if success else 'FAIL'} {elapsed:5.1f}s | ETA {eta / 60:.1f} min"
+            )
 
     print(f"\n  Completed: {completed - failed}/{total_runs}  |  Failed: {failed}")
 
@@ -180,7 +207,7 @@ def main():
         sys.exit(1)
 
     # ── Merge CSVs ──────────────────────────────────────────────────────────
-    print(f"\n[3] Merging CSV files...")
+    print("\n[3] Merging CSV files...")
     all_dfs = []
     for fault in fault_list:
         for trial in range(args.trials):
@@ -199,16 +226,16 @@ def main():
 
     master = pd.concat(all_dfs, ignore_index=True)
     master.to_csv(MERGED_CSV, index=False)
-    label_map = {0:"Normal", 1:"Power Fault", 2:"Congestion", 3:"gNB HW Failure"}
+    label_map = {0: "Normal", 1: "Power Fault", 2: "Congestion", 3: "gNB HW Failure"}
     print(f"  Saved: {MERGED_CSV}  ({len(master):,} rows)")
-    for k, v in master['fault_label'].value_counts().sort_index().items():
-        print(f"    {label_map.get(k,k)}: {v:,} ({100*v/len(master):.1f}%)")
+    for k, v in master["fault_label"].value_counts().sort_index().items():
+        print(f"    {label_map.get(k, k)}: {v:,} ({100 * v / len(master):.1f}%)")
 
     total_time = time.time() - t_start
-    print(f"\n{'='*60}")
-    print(f"  DONE — {total_time/60:.1f} minutes")
-    print(f"  Next: python3 preprocess_and_train.py")
-    print(f"{'='*60}\n")
+    print(f"\n{'=' * 60}")
+    print(f"  DONE — {total_time / 60:.1f} minutes")
+    print("  Next: python3 preprocess_and_train.py")
+    print(f"{'=' * 60}\n")
 
 
 if __name__ == "__main__":

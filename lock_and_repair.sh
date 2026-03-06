@@ -1,7 +1,7 @@
 #!/bin/bash
 # =============================================================================
 # THESIS SIM — LOCK AND REPAIR
-# Peters PG/2415890
+
 #
 # The install_ns3_thesis.sh Step 4 keeps re-running and upgrading packages.
 # This script:
@@ -88,7 +88,7 @@ cat > "$THESIS_DIR/install_ns3_thesis.sh" << 'INSTALL_SCRIPT'
 #!/bin/bash
 # =============================================================================
 # THESIS NS-3 INSTALLATION SCRIPT (Debian 12 / Ubuntu — uv + locked venv)
-# Peters PG/2415890
+
 # Run: bash install_ns3_thesis.sh
 # =============================================================================
 

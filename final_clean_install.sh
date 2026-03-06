@@ -1,7 +1,7 @@
 #!/bin/bash
 # =============================================================================
 # THESIS SIM — FINAL CLEAN INSTALL
-# Peters PG/2415890
+
 #
 # Fixes: numpy being upgraded to 2.x by shap/numba dependencies.
 # Solution: install ALL packages in ONE uv call with numpy<2 constraint,

@@ -1,7 +1,7 @@
 #!/bin/bash
 # =============================================================================
 # THESIS NS-3 INSTALLATION SCRIPT (Debian 12 / Ubuntu — uv + locked venv)
-# Peters PG/2415890
+
 # Run: bash install_ns3_thesis.sh
 # =============================================================================
 
