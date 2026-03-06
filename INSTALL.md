@@ -7,9 +7,9 @@
 
 ## Table of Contents
 
-- [Overview](#overview)
+- [🚀 Autopilot Mode — One Command Does Everything](#-autopilot-mode--one-command-does-everything)
 - [System Requirements](#system-requirements)
-- [Installation](#installation)
+- [Manual Installation](#manual-installation)
 - [Project File Structure](#project-file-structure)
 - [The NS-3 Simulation Script](#the-ns-3-simulation-script)
 - [Step-by-Step Execution](#step-by-step-execution)
@@ -20,13 +20,116 @@
 
 ---
 
+## 🚀 Autopilot Mode — One Command Does Everything
+
+> [!IMPORTANT]
+> **Start here.** `setup.sh` is a universal script that handles the entire environment from scratch — no manual steps required on a fresh machine.
+
+```bash
+bash setup.sh
+```
+
+That single command runs **10 automated steps**:
+
+| Step | What it does |
+|------|-------------|
+| **0** | Detects your OS, architecture, and whether you are inside WSL2 |
+| **1** | Installs system build tools (`apt` / `dnf` / `pacman` / Homebrew) |
+| **2** | Installs `uv` — a fast, isolated Python package manager |
+| **3** | Creates a clean Python venv with **`numpy<2` hard constraint** to prevent system-numpy bleed |
+| **4** | Creates workspace directories and copies all thesis scripts |
+| **5** | Downloads and builds NS-3 3.38 (skips if already present) |
+| **6** | Copies `thesis-fault-sim.cc` to `ns-3.38/scratch/` and compiles it |
+| **7** | Writes `activate_thesis.sh` for future terminal sessions |
+| **8** | Generates all 5 thesis figures into `reports/` |
+| **9** | Runs `check_environment.py` — prints a full health report |
+| **10** | Asks **y/n** before running the long training pipeline (A → B → C below) |
+
+### Platform support
+
+| Platform | Status |
+|----------|--------|
+| Ubuntu / Debian | ✅ Full support (apt) |
+| Fedora / RHEL | ✅ Full support (dnf) |
+| Arch Linux | ✅ Full support (pacman) |
+| macOS Intel | ✅ Full support (Homebrew + tensorflow-cpu) |
+| macOS Apple Silicon (M1/M2/M3) | ✅ Full support (tensorflow-macos + tensorflow-metal) |
+| WSL2 on Windows | ✅ Detected automatically — treated as Linux |
+| Native Windows | ⚠️ Shows WSL2 install guide and exits cleanly |
+
+### Windows: one-time WSL2 setup
+
+If you are on Windows, open **PowerShell as Administrator** and run:
+
+```powershell
+wsl --install -d Ubuntu-22.04
+```
+
+Reboot, open the Ubuntu app from the Start Menu, then copy `setup.sh` into your Ubuntu home and run it normally.
+
+> [!TIP]
+> Create `C:\Users\<YOU>\.wslconfig` to give WSL2 more resources:
+> ```ini
+> [wsl2]
+> memory=8GB
+> processors=4
+> ```
+> Then run `wsl --shutdown` and reopen Ubuntu.
+
+### Step 10 — Pipeline prompts (y/n)
+
+After setup is complete, the script asks before running each long stage:
+
+```
+  Step A — NS-3 simulation trials
+  Estimated time: 4–8 hours.
+  Run all 50 simulation trials now? [y/N]:
+
+  Step B — ML model training (RF + LSTM + SVM)
+  Estimated time: 1–2 hours.
+  Run ML training now? [y/N]:
+
+  Step C — MAPE-K self-healing evaluation
+  Estimated time: 15–30 minutes.
+  Run MAPE-K evaluation now? [y/N]:
+```
+
+Steps B and C are **smart-gated**: if the required outputs from the previous step do not exist, they warn and skip automatically rather than failing with a cryptic error.
+
+### Automatic error recovery
+
+If any step fails, the script catches the error and shows:
+
+```
+╔══════════════════════════════════════════════════════════════╗
+║  SETUP FAILED                                                ║
+║  Step: Python venv creation + numpy isolation                ║
+║  Line: 142  |  Exit code: 1                                  ║
+╚══════════════════════════════════════════════════════════════╝
+
+  Run repair now? [y/N]:
+```
+
+- **y** — nukes the venv and reinstalls all packages with the `numpy<2` constraint enforced in a single `uv` resolver call (this fixes the most common failure: system numpy 2.x bleeding into the venv)
+- **n** — prints the exact manual commands to fix it yourself
+
+The full log is always written to `~/thesis_setup.log` regardless of outcome.
+
+### After setup — activate in any new terminal
+
+```bash
+source ~/thesis-sim/activate_thesis.sh
+```
+
+---
+
 ## Overview
 
 The full pipeline has four sequential stages:
 
 | Stage | Script / Tool | Output | Est. Time |
 |-------|--------------|--------|-----------|
-| 1 | `install_ns3_thesis.sh` | Working NS-3 environment | 30–60 min |
+| 1 | `setup.sh` (or `install_ns3_thesis.sh`) | Working NS-3 environment | 30–60 min |
 | 2 | `run_all_trials.py` | `kpi_master_dataset.csv` (~51k rows) | 4–8 hours |
 | 3 | `preprocess_and_train.py` | RF, LSTM, SVM model files | 1–2 hours |
 | 4 | `mapek_loop.py` | MTTR & availability results | 15–30 min |
@@ -34,6 +137,7 @@ The full pipeline has four sequential stages:
 > **All code files are provided separately.** This document explains what each one does, where to place it, and the exact commands to run.
 
 ---
+
 
 ## System Requirements
 
@@ -400,11 +504,19 @@ pip3 install tensorflow[and-cuda]
 
 ## Quick Command Reference
 
+### ⚡ Autopilot (recommended)
+
 ```bash
-# ── ONE-TIME SETUP ─────────────────────────────────────────────────────────
-bash install_ns3_thesis.sh
-cp thesis-fault-sim.cc ~/ns-3.38/scratch/
-cd ~/ns-3.38 && ./ns3 build thesis-fault-sim
+# Everything in one command — detects OS, installs deps, builds NS-3, generates figures,
+# runs environment check, and asks y/n before the long training stages:
+bash setup.sh
+```
+
+### Manual steps (after setup.sh, or on a pre-configured machine)
+
+```bash
+# ── Activate venv in any new terminal ──────────────────────────────────────
+source ~/thesis-sim/activate_thesis.sh
 
 # ── STEP 1: Test single trial ───────────────────────────────────────────────
 cd ~/ns-3.38
@@ -420,8 +532,12 @@ python3 preprocess_and_train.py
 # ── STEP 4: Run MAPE-K evaluation ───────────────────────────────────────────
 python3 mapek_loop.py --model all
 
+# ── STEP 5: Generate all thesis figures ─────────────────────────────────────
+python3 scripts/generate_figures.py
+
 # ── CHECK RESULTS ────────────────────────────────────────────────────────────
 cat reports/mapek_summary.json
 ls -lh models/
 ls -lh output/raw/ | wc -l    # should show 200 CSV files
 ```
+
