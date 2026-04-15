@@ -83,8 +83,10 @@ on_error() {
       uv venv "$VENV_DIR" --python 3.11 --clear 2>/dev/null \
         || uv venv "$VENV_DIR" --python 3.10 --clear
 
+      # --link-mode hardlink: zero-copy install from uv cache → no ENOMEM on WSL2
       uv pip install \
         --python "$VENV_PY" \
+        --link-mode hardlink \
         "numpy>=1.23.5,<2.0" \
         "tensorflow-cpu==2.15.0" \
         "pandas>=1.5,<3" \
@@ -93,7 +95,10 @@ on_error() {
         "imbalanced-learn>=0.11" \
         "matplotlib>=3.6" \
         "seaborn>=0.12" \
-        "joblib>=1.2" \
+        "joblib>=1.2"
+      uv pip install \
+        --python "$VENV_PY" \
+        --link-mode hardlink \
         "jupyter" "notebook"
 
       "$VENV_PY" -c "
@@ -287,13 +292,21 @@ ok "Venv created: $VENV_DIR"
 unset PYTHONPATH
 export PYTHONNOUSERSITE=1
 
-info "Installing all ML packages (single uv call, numpy<2 enforced)..."
+info "Installing all ML packages (numpy<2 enforced)..."
 info "This takes 3–8 minutes on first run..."
+if [ "$IS_WSL" = true ]; then
+  warn "WSL2 detected: using --link-mode hardlink to avoid out-of-memory file-copy errors."
+  warn "If this still fails, add 'memory=8GB' to C:\\Users\\<YOU>\\.wslconfig and run: wsl --shutdown"
+fi
 
+# --link-mode hardlink: uv creates hardlinks from its cache into the venv.
+# Hardlinks reuse the same inode — no bytes are copied, so ENOMEM is eliminated.
+# Split into two batches to reduce peak concurrency further.
 if [ "$DISTRO" = "macos" ] && [ "$ARCH" = "arm64" ]; then
   # Apple Silicon: tensorflow-macos + tensorflow-metal
   uv pip install \
     --python "$VENV_PY" \
+    --link-mode hardlink \
     "numpy>=1.23.5,<2.0" \
     "tensorflow-macos" \
     "tensorflow-metal" \
@@ -303,12 +316,16 @@ if [ "$DISTRO" = "macos" ] && [ "$ARCH" = "arm64" ]; then
     "imbalanced-learn>=0.11" \
     "matplotlib>=3.6" \
     "seaborn>=0.12" \
-    "joblib>=1.2" \
+    "joblib>=1.2"
+  uv pip install \
+    --python "$VENV_PY" \
+    --link-mode hardlink \
     "jupyter" "notebook"
 else
   # Linux x86_64/aarch64 + macOS Intel — tensorflow-cpu (no CUDA deps)
   uv pip install \
     --python "$VENV_PY" \
+    --link-mode hardlink \
     "numpy>=1.23.5,<2.0" \
     "tensorflow-cpu==2.15.0" \
     "pandas>=1.5,<3" \
@@ -317,7 +334,10 @@ else
     "imbalanced-learn>=0.11" \
     "matplotlib>=3.6" \
     "seaborn>=0.12" \
-    "joblib>=1.2" \
+    "joblib>=1.2"
+  uv pip install \
+    --python "$VENV_PY" \
+    --link-mode hardlink \
     "jupyter" "notebook"
 fi
 
