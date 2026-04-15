@@ -73,14 +73,14 @@ on_error() {
   if [[ "${REPAIR_ANSWER,,}" == "y" ]]; then
     echo ""
     info "Running venv repair (numpy<2 constraint enforced)..."
-    rm -rf "$VENV_DIR"
     export PATH="$HOME/.cargo/bin:$HOME/.local/bin:$PATH"
     unset PYTHONPATH
     export PYTHONNOUSERSITE=1
 
     if command -v uv &>/dev/null; then
-      uv venv "$VENV_DIR" --python 3.11 --seed 2>/dev/null \
-        || uv venv "$VENV_DIR" --python 3.10 --seed
+      # --clear forces uv to replace any existing venv (handles WSL2 stale filesystem state)
+      uv venv "$VENV_DIR" --python 3.11 --seed --clear 2>/dev/null \
+        || uv venv "$VENV_DIR" --python 3.10 --seed --clear
 
       uv pip install \
         --python "$VENV_PY" \
@@ -274,13 +274,10 @@ ok "uv: $(uv --version)"
 _LAST_STEP="Python venv creation + numpy isolation"
 header "STEP 3 — Isolated Python venv (numpy<2 constraint)"
 
-# Always nuke old venv for a guaranteed clean state
-rm -rf "$VENV_DIR"
-
-# Install Python 3.11 via uv if not available
+# Always force-recreate the venv (--clear handles any lingering WSL2 filesystem metadata)
 uv python install 3.11 2>/dev/null || true
-uv venv "$VENV_DIR" --python 3.11 --seed 2>/dev/null \
-  || uv venv "$VENV_DIR" --python 3.10 --seed
+uv venv "$VENV_DIR" --python 3.11 --seed --clear 2>/dev/null \
+  || uv venv "$VENV_DIR" --python 3.10 --seed --clear
 
 ok "Venv created: $VENV_DIR"
 
