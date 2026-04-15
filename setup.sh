@@ -79,8 +79,9 @@ on_error() {
 
     if command -v uv &>/dev/null; then
       # --clear forces uv to replace any existing venv (handles WSL2 stale filesystem state)
-      uv venv "$VENV_DIR" --python 3.11 --seed --clear 2>/dev/null \
-        || uv venv "$VENV_DIR" --python 3.10 --seed --clear
+      # No --seed: avoids ENOMEM on memory-constrained WSL2
+      uv venv "$VENV_DIR" --python 3.11 --clear 2>/dev/null \
+        || uv venv "$VENV_DIR" --python 3.10 --clear
 
       uv pip install \
         --python "$VENV_PY" \
@@ -275,9 +276,10 @@ _LAST_STEP="Python venv creation + numpy isolation"
 header "STEP 3 — Isolated Python venv (numpy<2 constraint)"
 
 # Always force-recreate the venv (--clear handles any lingering WSL2 filesystem metadata)
+# No --seed: seeding pip/wheel causes ENOMEM on memory-constrained WSL2 (uv does not need it)
 uv python install 3.11 2>/dev/null || true
-uv venv "$VENV_DIR" --python 3.11 --seed --clear 2>/dev/null \
-  || uv venv "$VENV_DIR" --python 3.10 --seed --clear
+uv venv "$VENV_DIR" --python 3.11 --clear 2>/dev/null \
+  || uv venv "$VENV_DIR" --python 3.10 --clear
 
 ok "Venv created: $VENV_DIR"
 
