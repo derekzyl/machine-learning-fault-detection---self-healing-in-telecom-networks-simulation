@@ -405,6 +405,7 @@ copy_if_exists "mapek_loop.py"                "mapek_loop.py"
 copy_if_exists "check_environment.py"         "check_environment.py"
 copy_if_exists "thesis-fault-sim.cc"          "scripts/thesis-fault-sim.cc"
 copy_if_exists "thesis-fault-sim-lte.cc"      "scripts/thesis-fault-sim-lte.cc"
+copy_if_exists "thesis-fault-sim-nr.cc"       "scripts/thesis-fault-sim-nr.cc"
 copy_if_exists "scripts/generate_figures.py"  "scripts/generate_figures.py"
 copy_if_exists "scripts/install_5g_lena.sh"  "scripts/install_5g_lena.sh"
 copy_if_exists "scripts/ns3_thesis.sh"        "bin/ns3"
@@ -497,6 +498,18 @@ if [ -f "$SIM_CC" ]; then
     "$NS3_WRAPPER" build thesis-fault-sim-lte 2>&1 | tail -8
     ok "thesis-fault-sim-lte compiled (28 eNB HetNet, 500 UE, LENA + EPC)"
     info "LTE trials: python3 run_all_trials.py --lte --workers 2"
+  fi
+
+  NR_CC="$THESIS_DIR/scripts/thesis-fault-sim-nr.cc"
+  NR_SCRATCH="$NS3_DIR/scratch/thesis-fault-sim-nr.cc"
+  if [ -f "$NR_CC" ] && find "$NS3_DIR/build" -name "libns3.38-nr*" 2>/dev/null | grep -q .; then
+    cp "$NR_CC" "$NR_SCRATCH"
+    info "Building thesis-fault-sim-nr (5G NR/EPC — Phase 3)..."
+    "$NS3_WRAPPER" build thesis-fault-sim-nr 2>&1 | tail -8
+    ok "thesis-fault-sim-nr compiled (28 gNB HetNet, 5G-LENA n78)"
+    info "NR trials: python3 run_all_trials.py --nr --workers 1"
+  elif [ -f "$NR_CC" ]; then
+    warn "thesis-fault-sim-nr.cc present but NR module not built — run scripts/install_5g_lena.sh"
   fi
 else
   warn "thesis-fault-sim.cc not found — skipping compile"

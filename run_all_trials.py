@@ -24,12 +24,16 @@ NS3_WRAPPER = os.path.expanduser("~/thesis-sim/bin/ns3")
 VENV_PY = os.path.expanduser("~/thesis-sim/venv/bin/python")
 SIM_SCRIPT = "thesis-fault-sim"
 SIM_SCRIPT_LTE = "thesis-fault-sim-lte"
+SIM_SCRIPT_NR = "thesis-fault-sim-nr"
 OUTPUT_DIR = os.path.expanduser("~/thesis-sim/output/raw")
 MERGED_CSV = os.path.expanduser("~/thesis-sim/output/kpi_master_dataset.csv")
 N_TRIALS = 50
 FAULT_TYPES = ["none", "power", "congestion", "hardware"]
 LTE_SIM_TIME = 120  # seconds; full 300s is ~2h/trial on typical hardware
 LTE_NUM_UES = 280  # NS-3 HARQ stable limit (use --num-ues 500 for thesis target if simTime>=120)
+NR_SIM_TIME = 120
+NR_NUM_UES = 280
+RAN_SIM_SCRIPTS = {SIM_SCRIPT_LTE, SIM_SCRIPT_NR}
 
 # Global flag — set from args
 DEBUG = False
@@ -48,10 +52,12 @@ def ns3_cmd(*args):
 def run_trial(args):
     trial, fault, output_dir, sim, sim_time, num_ues = args
     sim_args = f"--trial={trial} --fault={fault} --outputDir={output_dir}"
-    if sim == SIM_SCRIPT_LTE:
+    if sim in RAN_SIM_SCRIPTS:
         sim_args += f" --simTime={sim_time} --numUes={num_ues}"
     cmd = ns3_cmd("run", f"{sim} {sim_args}")
-    if sim == SIM_SCRIPT_LTE:
+    if sim == SIM_SCRIPT_NR:
+        timeout = max(7200, int(sim_time * 80))
+    elif sim == SIM_SCRIPT_LTE:
         timeout = max(3600, int(sim_time * 50))
     else:
         timeout = 600
@@ -85,14 +91,14 @@ def debug_single_trial(sim=SIM_SCRIPT, sim_time=LTE_SIM_TIME, num_ues=LTE_NUM_UE
     """Run one trial in foreground showing full NS-3 output. Use to diagnose failures."""
     print("\n" + "=" * 60)
     print(f"  DEBUG MODE — {sim} trial=0 fault=none")
-    if sim == SIM_SCRIPT_LTE:
+    if sim in RAN_SIM_SCRIPTS:
         print(f"  simTime={sim_time}s  numUes={num_ues}")
     print("  Showing full NS-3 output...")
     print("=" * 60 + "\n")
 
     os.makedirs(OUTPUT_DIR, exist_ok=True)
     sim_args = f"--trial=0 --fault=none --outputDir={OUTPUT_DIR}"
-    if sim == SIM_SCRIPT_LTE:
+    if sim in RAN_SIM_SCRIPTS:
         sim_args += f" --simTime={sim_time} --numUes={num_ues}"
     cmd = ns3_cmd("run", f"{sim} {sim_args}")
 
@@ -135,29 +141,46 @@ def main():
         help="Use real LTE/EPC simulation (thesis-fault-sim-lte, slower, Ch.3 aligned)",
     )
     parser.add_argument(
+        "--nr",
+        action="store_true",
+        help="Use real 5G NR/EPC simulation (thesis-fault-sim-nr, 5G-LENA, slowest)",
+    )
+    parser.add_argument(
         "--sim-time",
         type=int,
         default=None,
-        help=f"LTE sim duration in seconds (default {LTE_SIM_TIME} with --lte, 300 in C++ if omitted)",
+        help=f"RAN sim duration in seconds (default 120 with --lte/--nr, 300 in C++ if omitted)",
     )
     parser.add_argument(
         "--num-ues",
         type=int,
         default=None,
-        help=f"LTE UE count (default {LTE_NUM_UES} with --lte; thesis Table 3.1 target is 500)",
+        help=f"RAN UE count (default 280 with --lte/--nr; thesis Table 3.1 target is 500)",
     )
     args = parser.parse_args()
 
+    if args.lte and args.nr:
+        print("ERROR: use only one of --lte or --nr")
+        sys.exit(1)
+
     global ACTIVE_SIM, LTE_SIM_TIME_ACTIVE, LTE_NUM_UES_ACTIVE
-    ACTIVE_SIM = SIM_SCRIPT_LTE if args.lte else SIM_SCRIPT
+    if args.nr:
+        ACTIVE_SIM = SIM_SCRIPT_NR
+    elif args.lte:
+        ACTIVE_SIM = SIM_SCRIPT_LTE
+    else:
+        ACTIVE_SIM = SIM_SCRIPT
+
+    default_sim_time = NR_SIM_TIME if ACTIVE_SIM == SIM_SCRIPT_NR else LTE_SIM_TIME
+    default_num_ues = NR_NUM_UES if ACTIVE_SIM == SIM_SCRIPT_NR else LTE_NUM_UES
     if args.sim_time is not None:
         LTE_SIM_TIME_ACTIVE = args.sim_time
-    elif ACTIVE_SIM == SIM_SCRIPT_LTE:
-        LTE_SIM_TIME_ACTIVE = LTE_SIM_TIME
+    elif ACTIVE_SIM in RAN_SIM_SCRIPTS:
+        LTE_SIM_TIME_ACTIVE = default_sim_time
     if args.num_ues is not None:
         LTE_NUM_UES_ACTIVE = args.num_ues
-    elif ACTIVE_SIM == SIM_SCRIPT_LTE:
-        LTE_NUM_UES_ACTIVE = LTE_NUM_UES
+    elif ACTIVE_SIM in RAN_SIM_SCRIPTS:
+        LTE_NUM_UES_ACTIVE = default_num_ues
 
     os.makedirs(OUTPUT_DIR, exist_ok=True)
 
@@ -183,8 +206,8 @@ def main():
     print(f"\n{'=' * 60}")
     print("  THESIS NS-3 SIMULATION RUNNER")
     print(f"  Simulator: {ACTIVE_SIM}")
-    if ACTIVE_SIM == SIM_SCRIPT_LTE:
-        print(f"  LTE simTime: {LTE_SIM_TIME_ACTIVE}s  |  numUes: {LTE_NUM_UES_ACTIVE}")
+    if ACTIVE_SIM in RAN_SIM_SCRIPTS:
+        print(f"  RAN simTime: {LTE_SIM_TIME_ACTIVE}s  |  numUes: {LTE_NUM_UES_ACTIVE}")
     print(f"  Trials: {args.trials}  |  Fault types: {fault_list}")
     print(f"  Total runs: {total_runs}  |  Workers: {args.workers}")
     print(f"  Output: {OUTPUT_DIR}")
@@ -206,9 +229,14 @@ def main():
 
     # ── Quick sanity check before launching all workers ────────────────────
     print("[1b] Quick sanity check (1 trial before launching all workers)...")
-    test_timeout = max(3600, LTE_SIM_TIME_ACTIVE * 50) if ACTIVE_SIM == SIM_SCRIPT_LTE else 120
+    if ACTIVE_SIM == SIM_SCRIPT_NR:
+        test_timeout = max(7200, LTE_SIM_TIME_ACTIVE * 80)
+    elif ACTIVE_SIM == SIM_SCRIPT_LTE:
+        test_timeout = max(3600, LTE_SIM_TIME_ACTIVE * 50)
+    else:
+        test_timeout = 120
     test_args = f"{ACTIVE_SIM} --trial=0 --fault=none --outputDir={OUTPUT_DIR}"
-    if ACTIVE_SIM == SIM_SCRIPT_LTE:
+    if ACTIVE_SIM in RAN_SIM_SCRIPTS:
         test_args += f" --simTime={LTE_SIM_TIME_ACTIVE} --numUes={LTE_NUM_UES_ACTIVE}"
     test_cmd = ns3_cmd("run", test_args)
     test = subprocess.run(

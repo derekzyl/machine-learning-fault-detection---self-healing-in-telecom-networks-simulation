@@ -18,7 +18,7 @@ N_UES_TARGET = 500  # Table 3.1; LTE sim may use 280 on low-RAM hosts (--numUes)
 
 # RAN stack (Ch. 3 wording): NS-3 3.38 LENA = LTE/EPC. True 5G NR is not in this build.
 RAN_SIMULATOR_LTE = "NS-3 3.38 LENA + EPC (thesis-fault-sim-lte)"
-RAN_SIMULATOR_NR = "NS-3 3.38 + 5G-LENA v2.4 (contrib/nr) — module installed; thesis-fault-sim-nr pending"
+RAN_SIMULATOR_NR = "NS-3 3.38 + 5G-LENA v2.4 NR/EPC (thesis-fault-sim-nr)"
 RAN_SIMULATOR_KPI = "NS-3 KPI event generator (thesis-fault-sim)"
 # Use in thesis: "LTE-A HetNet surrogate for 5G dense small-cell deployment studies"
 RAN_5G_NARRATIVE = (
