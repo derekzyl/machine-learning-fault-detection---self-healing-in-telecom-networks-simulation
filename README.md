@@ -323,6 +323,28 @@ No. It is a **simulation study** with operationally grounded remediation times (
 
 ---
 
+## Graphical interface (no terminal required)
+
+Double-click or run:
+
+```bash
+./run_gui.sh
+```
+
+Or from the project folder:
+
+```bash
+python3 thesis_gui.py   # uses ~/thesis-sim/venv/bin/python if available
+```
+
+The GUI provides buttons for: **Setup**, **Simulation** (KPI / LTE / NR), **ML training**, **MAPE-K**, **figures**, and **PDF/PowerPoint** generation — with a live activity log.
+
+**Desktop shortcut (Linux):** copy `Thesis-Pipeline.desktop` to your Desktop, then right-click → Allow Launching.
+
+> Requires Tkinter. `setup.sh` installs `python3-tk` on Ubuntu. The thesis venv Python is used automatically when present.
+
+---
+
 ## Quickstart
 
 ### Option A — Full autopilot (recommended)

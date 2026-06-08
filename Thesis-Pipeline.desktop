@@ -1,0 +1,11 @@
+[Desktop Entry]
+Version=1.0
+Type=Application
+Name=Thesis Pipeline
+Comment=ML Fault Detection & Self-Healing — graphical launcher
+Exec=/home/cybergenii/Downloads/ml-project/machine-learning-fault-detection---self-healing-in-telecom-networks-simulation/run_gui.sh
+Path=/home/cybergenii/Downloads/ml-project/machine-learning-fault-detection---self-healing-in-telecom-networks-simulation
+Icon=utilities-terminal
+Terminal=false
+Categories=Science;Education;
+StartupNotify=true

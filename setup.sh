@@ -238,7 +238,7 @@ elif command -v apt-get &>/dev/null; then
   sudo apt-get update -qq
   sudo apt-get install -y \
     build-essential cmake ninja-build g++ git wget curl \
-    python3 python3-dev python3-pip \
+    python3 python3-dev python3-pip python3-tk \
     libboost-all-dev libssl-dev libxml2-dev \
     gsl-bin libgsl-dev libsqlite3-dev \
     tar bzip2 2>/dev/null || true
@@ -400,6 +400,9 @@ copy_if_exists "run_chapter4_pipeline.sh"        "run_chapter4_pipeline.sh"
 copy_if_exists "thesis_constants.py"            "thesis_constants.py"
 copy_if_exists "thesis_eval.py"                 "thesis_eval.py"
 copy_if_exists "run_all_trials.py"            "run_all_trials.py"
+copy_if_exists "thesis_gui.py"                "thesis_gui.py"
+copy_if_exists "run_gui.sh"                   "run_gui.sh"
+copy_if_exists "run_chapter4_pipeline.sh"     "run_chapter4_pipeline.sh"
 copy_if_exists "preprocess_and_train.py"      "preprocess_and_train.py"
 copy_if_exists "mapek_loop.py"                "mapek_loop.py"
 copy_if_exists "check_environment.py"         "check_environment.py"

@@ -72,6 +72,31 @@ Chapter 4 availability plots include the **NCC 99%** reference line (`generate_c
 
 ---
 
+## Graphical interface (easiest — no terminal commands)
+
+```bash
+cd machine-learning-fault-detection---self-healing-in-telecom-networks-simulation
+./run_gui.sh
+```
+
+Opens a **Tkinter window** with buttons for setup, simulation, ML training, MAPE-K, figures, and PDF/PowerPoint. Progress appears in the built-in log panel.
+
+| Button | What it does |
+|--------|----------------|
+| Run full setup | Runs `setup.sh` (first time, ~30–60 min) |
+| Check environment | Verifies NS-3, Python, packages |
+| Run simulation trials | KPI / LTE / NR with trials, workers, UEs |
+| Train models | `preprocess_and_train.py` |
+| Run MAPE-K | Self-healing evaluation |
+| Full Chapter 4 pipeline | Train → MAPE-K → figures |
+| Generate PDF + PowerPoint | `docs/Project_Overview.pdf` and `.pptx` |
+
+**Linux desktop shortcut:** copy `Thesis-Pipeline.desktop` to Desktop → Allow Launching.
+
+Requires **Tkinter** (`python3-tk` — installed by `setup.sh` on Ubuntu).
+
+---
+
 ## Autopilot Install (`setup.sh`)
 
 **Start here on a fresh machine.**
