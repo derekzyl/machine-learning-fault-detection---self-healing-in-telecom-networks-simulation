@@ -1,18 +1,24 @@
-# 🔧 NS-3 Simulation — Installation & Execution Guide
+# Installation & Execution Guide
 
-> **Machine Learning Fault Detection & Self-Healing in Telecom Networks**  
-> Complete setup, code placement, and step-by-step execution path.
+> **ML Fault Detection & Self-Healing in Telecom Networks**  
+> Complete setup, simulation execution, and pipeline walkthrough.
+
+**Companion docs:** [README.md](README.md) (chapter map & integrity) · [docs/Project_Overview.pdf](docs/Project_Overview.pdf) · [docs/Project_Overview.pptx](docs/Project_Overview.pptx) (technical overview).
 
 ---
 
 ## Table of Contents
 
-- [🚀 Autopilot Mode — One Command Does Everything](#-autopilot-mode--one-command-does-everything)
+- [Real-World Context (MTN / Airtel)](#real-world-context-mtn--airtel)
+- [Autopilot Install (`setup.sh`)](#autopilot-install-setupsh)
 - [System Requirements](#system-requirements)
+- [Three Simulation Backends](#three-simulation-backends)
 - [Manual Installation](#manual-installation)
 - [Project File Structure](#project-file-structure)
-- [The NS-3 Simulation Script](#the-ns-3-simulation-script)
+- [Network Topology & Fault Model](#network-topology--fault-model)
+- [CSV Output Format](#csv-output-format)
 - [Step-by-Step Execution](#step-by-step-execution)
+- [Chapter 4 Pipeline](#chapter-4-pipeline)
 - [Troubleshooting](#troubleshooting)
 - [Manual Dataset Merge](#manual-dataset-merge)
 - [Time-Saving Tips](#time-saving-tips)
@@ -20,202 +26,208 @@
 
 ---
 
-## 🚀 Autopilot Mode — One Command Does Everything
+## Real-World Context (MTN / Airtel)
 
-> [!IMPORTANT]
-> **Start here.** `setup.sh` is a universal script that handles the entire environment from scratch — no manual steps required on a fresh machine.
+This is a **simulation study** — not a live integration with MTN Nigeria, Airtel Nigeria, or any operator OSS. However, the entire pipeline is designed to **imitate real operational scenarios** that field engineers and NOC teams encounter in Nigerian mobile networks.
+
+### Why simulation instead of live network data?
+
+| Constraint | Implication |
+|------------|-------------|
+| Operator KPI data is proprietary | Cannot publish labelled fault datasets from live MTN/Airtel OSS |
+| Ground-truth fault labels are rare in production | Supervised ML needs known fault onset/time/class |
+| MAPE-K actions cannot be executed on live RAN safely | Recovery policies are **modelled** with operational time estimates |
+| Reproducibility for thesis examination | NS-3 gives controlled, repeatable Monte Carlo trials |
+
+**Thesis positioning:** *"A simulation-based digital twin of dense urban HetNet behaviour, calibrated to Nigerian operational remediation practices and NCC availability expectations."*
+
+### Operator scenario → simulation mapping
+
+| Real-world scenario (MTN / Airtel context) | Typical field cause | Simulation proxy | KPI signature in CSV |
+|--------------------------------------------|---------------------|--------------------|----------------------|
+| **Cell outage / no service** | Grid failure, diesel genset fault, rectifier trip, vandalism | **Power fault** — gNB TX power collapse | RSRP → −115 dBm, throughput → ~0, HO failure, loss ↑ |
+| **Severe congestion / slow data** | Peak-hour data surge, stadium/event load, backhaul saturation | **Congestion** — 3× UDP traffic on affected cell | PRB > 90%, latency ↑, throughput −65% |
+| **Hardware / site failure** | RRU/BBU fault, fibre cut to site, cooling failure | **HW failure** — PHY deactivation (TX → 0) | Partial collapse, neighbour load shift, high loss |
+| **Normal operations** | Typical urban mobility + mixed traffic | **None** campaign (no active fault window) | RSRP −70 to −85 dBm, PRB 55–70%, stable HO |
+
+### Nigerian operational assumptions (Table 4.6)
+
+These values in `thesis_constants.py` reflect **reactive OSS workflows** (manual dispatch, field visit, spare parts) common in Nigerian RAN operations:
+
+| Fault class | Reactive MTTR (manual) | MAPE-K automated target (LSTM) |
+|-------------|------------------------|--------------------------------|
+| Power fault | ~240 min (4 h) | ~35 min |
+| Congestion | ~300 min (5 h) | ~48 min |
+| HW failure | ~290 min | ~45 min |
+
+The **reactive baseline** in `mapek_loop.py` waits for **severe** thresholds (PRB > 90%, RSRP < −110 dBm, loss > 30%) — imitating threshold-only OSS alarms that fire late. The **ML + MAPE-K path** detects degradation earlier from KPI windows, imitating proactive SON/analytics platforms.
+
+### Regulatory benchmark
+
+Chapter 4 availability plots include the **NCC 99%** reference line (`generate_chapter4_figures.py`) — the Nigerian Communications Commission quality-of-service expectation for network availability.
+
+### What to tell examiners
+
+> *We do not claim this ran on MTN or Airtel live cores. We claim the fault types, KPI signatures, HetNet topology, and remediation latencies are **operationally grounded** in Nigerian MNO practice, and the comparative benefit of ML+MAPE-K over reactive monitoring is quantified in a controlled, reproducible NS-3 environment.*
+
+---
+
+## Autopilot Install (`setup.sh`)
+
+**Start here on a fresh machine.**
 
 ```bash
 bash setup.sh
 ```
 
-That single command runs **10 automated steps**:
+### What `setup.sh` does (10 steps)
 
-| Step | What it does |
-|------|-------------|
-| **0** | Detects your OS, architecture, and whether you are inside WSL2 |
-| **1** | Installs system build tools (`apt` / `dnf` / `pacman` / Homebrew) |
-| **2** | Installs `uv` — a fast, isolated Python package manager |
-| **3** | Creates a clean Python venv with **`numpy<2` hard constraint** to prevent system-numpy bleed |
-| **4** | Creates workspace directories and copies all thesis scripts |
-| **5** | Downloads and builds NS-3 3.38 (skips if already present) |
-| **6** | Copies `thesis-fault-sim.cc` to `ns-3.38/scratch/` and compiles it |
-| **7** | Writes `activate_thesis.sh` for future terminal sessions |
-| **8** | Generates all 5 thesis figures into `reports/` |
-| **9** | Runs `check_environment.py` — prints a full health report |
-| **10** | Asks **y/n** before running the long training pipeline (A → B → C below) |
+| Step | Action |
+|------|--------|
+| **0** | Detect OS, architecture, WSL2 |
+| **1** | Install build tools (apt / dnf / pacman / Homebrew) |
+| **2** | Install `uv` package manager |
+| **3** | Create Python venv with `numpy<2` isolation |
+| **4** | Copy all thesis scripts to `~/thesis-sim/` |
+| **5** | Download/build NS-3 3.38; clone **5G-LENA** (`contrib/nr`) if missing |
+| **6** | Compile `thesis-fault-sim`, `thesis-fault-sim-lte`, `thesis-fault-sim-nr` (if NR built) |
+| **7** | Write `activate_thesis.sh` |
+| **8** | Generate Chapter 3 figures |
+| **9** | Run `check_environment.py` |
+| **10** | Prompt y/n for trials → training → MAPE-K |
 
-### Platform support
-
-| Platform | Status |
-|----------|--------|
-| Ubuntu / Debian | ✅ Full support (apt) |
-| Fedora / RHEL | ✅ Full support (dnf) |
-| Arch Linux | ✅ Full support (pacman) |
-| macOS Intel | ✅ Full support (Homebrew + tensorflow-cpu) |
-| macOS Apple Silicon (M1/M2/M3) | ✅ Full support (tensorflow-macos + tensorflow-metal) |
-| WSL2 on Windows | ✅ Detected automatically — treated as Linux |
-| Native Windows | ⚠️ Shows WSL2 install guide and exits cleanly |
-
-### Windows: one-time WSL2 setup
-
-If you are on Windows, open **PowerShell as Administrator** and run:
-
-```powershell
-wsl --install -d Ubuntu-22.04
-```
-
-Reboot, open the Ubuntu app from the Start Menu, then copy `setup.sh` into your Ubuntu home and run it normally.
-
-> [!TIP]
-> Create `C:\Users\<YOU>\.wslconfig` to give WSL2 more resources:
-> ```ini
-> [wsl2]
-> memory=8GB
-> processors=4
-> ```
-> Then run `wsl --shutdown` and reopen Ubuntu.
-
-### Step 10 — Pipeline prompts (y/n)
-
-After setup is complete, the script asks before running each long stage:
+### Step 10 prompts
 
 ```
   Step A — NS-3 simulation trials
-  Estimated time: 4–8 hours.
   Run all 50 simulation trials now? [y/N]:
+    • Fast KPI generator: ~2–15 min (200 trials)
+    • LTE (--lte): hours to days
+    • NR (--nr): very slow; use --workers 1
 
-  Step B — ML model training (RF + LSTM + SVM)
-  Estimated time: 1–2 hours.
+  Step B — ML training (RF + LSTM + SVM)
   Run ML training now? [y/N]:
 
-  Step C — MAPE-K self-healing evaluation
-  Estimated time: 15–30 minutes.
+  Step C — MAPE-K evaluation
   Run MAPE-K evaluation now? [y/N]:
 ```
 
-Steps B and C are **smart-gated**: if the required outputs from the previous step do not exist, they warn and skip automatically rather than failing with a cryptic error.
-
-### Automatic error recovery
-
-If any step fails, the script catches the error and shows:
-
-```
-╔══════════════════════════════════════════════════════════════╗
-║  SETUP FAILED                                                ║
-║  Step: Python venv creation + numpy isolation                ║
-║  Line: 142  |  Exit code: 1                                  ║
-╚══════════════════════════════════════════════════════════════╝
-
-  Run repair now? [y/N]:
-```
-
-- **y** — nukes the venv and reinstalls all packages with the `numpy<2` constraint enforced in a single `uv` resolver call (this fixes the most common failure: system numpy 2.x bleeding into the venv)
-- **n** — prints the exact manual commands to fix it yourself
-
-The full log is always written to `~/thesis_setup.log` regardless of outcome.
-
-### After setup — activate in any new terminal
+### After setup — every new terminal
 
 ```bash
 source ~/thesis-sim/activate_thesis.sh
 ```
 
+### Platform support
+
+| Platform | Status |
+|----------|--------|
+| Ubuntu / Debian | Full support |
+| Fedora / RHEL | Full support |
+| Arch Linux | Full support |
+| macOS | Full support (Homebrew) |
+| WSL2 on Windows | Detected automatically |
+| Native Windows | WSL2 install guide only |
+
+### Windows WSL2 (one-time)
+
+```powershell
+wsl --install -d Ubuntu-22.04
+```
+
+Optional `C:\Users\<YOU>\.wslconfig`:
+
+```ini
+[wsl2]
+memory=8GB
+processors=4
+```
+
+Then `wsl --shutdown` and reopen Ubuntu.
+
 ---
-
-## Overview
-
-The full pipeline has four sequential stages:
-
-| Stage | Script / Tool | Output | Est. Time |
-|-------|--------------|--------|-----------|
-| 1 | `setup.sh` (or `install_ns3_thesis.sh`) | Working NS-3 environment | 30–60 min |
-| 2 | `run_all_trials.py` | `kpi_master_dataset.csv` (~51k rows) | 4–8 hours |
-| 3 | `preprocess_and_train.py` | RF, LSTM, SVM model files | 1–2 hours |
-| 4 | `mapek_loop.py` | MTTR & availability results | 15–30 min |
-
-> **All code files are provided separately.** This document explains what each one does, where to place it, and the exact commands to run.
-
----
-
 
 ## System Requirements
 
-### Operating System
-
-NS-3 runs natively on Linux. **Ubuntu 22.04 LTS** is strongly recommended.
-
-- **Windows users** — use WSL2 or a VirtualBox VM running Ubuntu
-- **macOS users** — Homebrew installation is possible but Ubuntu is preferred
-
 | Requirement | Minimum | Recommended |
 |-------------|---------|-------------|
-| OS | Ubuntu 20.04 LTS (or WSL2) | Ubuntu 22.04 LTS |
-| RAM | 8 GB | 16 GB+ |
-| Disk | 20 GB free | 50 GB free |
+| OS | Ubuntu 20.04 / WSL2 | Ubuntu 22.04 LTS |
+| RAM | 8 GB | 16 GB+ (LTE/NR sims) |
+| Disk | 20 GB free | **50 GB+** (NS-3 + NR build) |
 | CPU | 4-core x86-64 | 8-core+ |
-| GPU | Not required | NVIDIA + CUDA (5–10× LSTM speedup) |
-| Python | 3.8+ | 3.10 |
+| Python | 3.10+ | 3.11 (NS-3 wrapper) |
+| GPU | Not required | Optional for LSTM speedup |
 
-### WSL2 Setup (Windows only)
+### NS-3 modules required
 
-```powershell
-# In PowerShell (as Administrator):
-wsl --install -d Ubuntu-22.04
-# After reboot, open Ubuntu from Start Menu and continue this guide inside the Ubuntu terminal.
+```
+core, network, internet, applications, mobility, spectrum,
+propagation, antenna, lte, nr, energy, flow-monitor, point-to-point, stats
+```
+
+`nr` requires 5G-LENA: `bash scripts/install_5g_lena.sh`
+
+---
+
+## Three Simulation Backends
+
+Choose based on **speed vs. RAN fidelity**. All produce the **same CSV schema**.
+
+| Script | Stack | Speed | Realism | Command |
+|--------|-------|-------|---------|---------|
+| `thesis-fault-sim` | KPI event generator | Fastest (~1 min/trial) | Simplified physics; correct labels | `python3 run_all_trials.py` |
+| `thesis-fault-sim-lte` | LENA LTE + EPC | Slow (~30–120 min/trial) | Real PHY traces + FlowMonitor | `python3 run_all_trials.py --lte` |
+| `thesis-fault-sim-nr` | 5G-LENA NR + EPC | Slowest (hours/trial) | True NR n78 (3.5 GHz) | `python3 run_all_trials.py --nr --workers 1` |
+
+### Recommended workflow
+
+1. **Develop ML pipeline** — fast KPI generator (200 trials, ~1.68M rows).
+2. **Validate RAN traces** — LTE batch (`--lte --sim-time 120 --num-ues 280`).
+3. **5G NR extension** — NR smoke test then selective trials (`--nr`).
+
+### Build all sims manually
+
+```bash
+cp ~/thesis-sim/scripts/thesis-fault-sim*.cc ~/ns-3.38/scratch/
+cd ~/ns-3.38
+~/thesis-sim/bin/ns3 build thesis-fault-sim
+~/thesis-sim/bin/ns3 build thesis-fault-sim-lte
+~/thesis-sim/bin/ns3 build thesis-fault-sim-nr   # requires contrib/nr
 ```
 
 ---
 
-## Installation
+## Manual Installation
 
-### Step 1 — Create the workspace and place files
+Use if `setup.sh` fails or you already have NS-3.
 
-```bash
-mkdir -p ~/thesis-sim/scripts
-mkdir -p ~/thesis-sim/output/raw
-mkdir -p ~/thesis-sim/models
-mkdir -p ~/thesis-sim/reports
-
-cp run_all_trials.py        ~/thesis-sim/
-cp preprocess_and_train.py  ~/thesis-sim/
-cp mapek_loop.py            ~/thesis-sim/
-cp check_environment.py     ~/thesis-sim/
-cp thesis-fault-sim.cc      ~/thesis-sim/scripts/
-```
-
-### Step 2 — Run the installation script
+### 1. Workspace
 
 ```bash
-chmod +x install_ns3_thesis.sh
-bash install_ns3_thesis.sh
+mkdir -p ~/thesis-sim/{scripts,output/raw,models,reports,bin}
+# Copy all repo files into ~/thesis-sim/ (or run setup.sh Step 4)
 ```
 
-The script will:
-1. Install build tools (`cmake`, `g++`, `ninja`)
-2. Install Python ML packages (TensorFlow, scikit-learn, etc.)
-3. Download NS-3 3.38 (~120 MB)
-4. Configure and build NS-3 (~10–30 min)
-5. Copy the simulation script to the NS-3 scratch folder
-6. Run a 30-second test simulation
+### 2. System packages (Ubuntu)
 
-### Manual Installation (if the script fails)
-
-**System packages:**
 ```bash
 sudo apt-get update
 sudo apt-get install -y build-essential cmake ninja-build g++ \
-    python3 python3-pip python3-dev git wget \
+    python3 python3-pip python3-dev python3-venv git wget \
     libboost-all-dev libssl-dev libxml2-dev gsl-bin libgsl-dev
 ```
 
-**Python packages:**
+### 3. Python environment
+
 ```bash
-pip3 install numpy pandas scipy scikit-learn imbalanced-learn \
-             tensorflow matplotlib seaborn joblib shap jupyter
+cd ~/thesis-sim
+python3 -m venv venv
+source venv/bin/activate
+pip install -r requirements.txt
 ```
 
-**Download and build NS-3:**
+### 4. NS-3 3.38
+
 ```bash
 cd ~
 wget https://www.nsnam.org/releases/ns-allinone-3.38.tar.bz2
@@ -223,35 +235,23 @@ tar xjf ns-allinone-3.38.tar.bz2
 mv ns-allinone-3.38/ns-3.38 ~/ns-3.38
 
 cd ~/ns-3.38
-./ns3 configure --build-profile=optimized \
-    --enable-modules=lte,network,internet,applications,mobility,energy,flow-monitor
-./ns3 build
+~/thesis-sim/bin/ns3 configure --build-profile=optimized \
+    --enable-modules=core,network,internet,applications,mobility,spectrum,propagation,antenna,lte,nr,energy,flow-monitor,point-to-point,stats
+~/thesis-sim/bin/ns3 build
 ```
 
-**Place the simulation script:**
+### 5. 5G-LENA (for `--nr` only)
+
 ```bash
-cp ~/thesis-sim/scripts/thesis-fault-sim.cc ~/ns-3.38/scratch/
-cd ~/ns-3.38 && ./ns3 build thesis-fault-sim
+bash ~/thesis-sim/scripts/install_5g_lena.sh
+# Reconfigure + rebuild NS-3 with nr module
 ```
 
-### Step 3 — Verify installation
+### 6. Verify
 
 ```bash
-cd ~/thesis-sim
+source ~/thesis-sim/activate_thesis.sh
 python3 check_environment.py
-```
-
-Expected output:
-```
-[OK] Python 3
-[OK] CMake
-[OK] g++ compiler
-[OK] NS-3 directory at ~/ns-3.38
-[OK] NS-3 executable
-[OK] LTE module
-[OK] TensorFlow 2.x
-[OK] Scikit-learn
-[OK] imbalanced-learn (SMOTE)
 ```
 
 ---
@@ -259,173 +259,201 @@ Expected output:
 ## Project File Structure
 
 ```
-~/ns-3.38/
-└── scratch/
-    └── thesis-fault-sim.cc         ← NS-3 C++ simulation script (PLACE HERE)
+~/ns-3.38/scratch/
+├── thesis-fault-sim.cc       # Fast KPI generator
+├── thesis-fault-sim-lte.cc   # LENA LTE/EPC
+└── thesis-fault-sim-nr.cc    # 5G-LENA NR/EPC
 
 ~/thesis-sim/
-├── install_ns3_thesis.sh           ← One-time installation script
-├── check_environment.py            ← Environment verification
-├── run_all_trials.py               ← Step 2: runs all 50 trials
-├── preprocess_and_train.py         ← Step 3: ML training pipeline
-├── mapek_loop.py                   ← Step 4: MAPE-K evaluation
+├── setup.sh                  # Autopilot installer
+├── activate_thesis.sh        # Source in every terminal
+├── thesis_constants.py       # Ch. 3/4 approved parameters
+├── run_all_trials.py         # Stage 2: trial orchestration
+├── preprocess_and_train.py   # Stage 3: ML training
+├── mapek_loop.py             # Stage 4: MAPE-K evaluation
+├── run_chapter4_pipeline.sh  # Train → MAPE-K → Ch. 4 figures
+├── thesis_eval.py            # MAPE-K metric helpers
 │
 ├── scripts/
-│   └── thesis-fault-sim.cc         ← Backup copy of simulation script
+│   ├── thesis-fault-sim*.cc  # Backup copies
+│   ├── generate_figures.py           # Ch. 3 figures
+│   ├── generate_chapter4_figures.py    # Ch. 4 figures
+│   ├── install_5g_lena.sh
+│   └── ns3_thesis.sh         # NS-3 wrapper (venv Python 3.11)
 │
 ├── output/
-│   ├── raw/                        ← NS-3 CSV output (auto-created)
-│   │   ├── kpi_trial0_power.csv
-│   │   ├── kpi_trial0_congestion.csv
-│   │   └── ... (200 CSV files: 4 fault types × 50 trials)
-│   └── kpi_master_dataset.csv      ← Merged dataset (auto-created)
+│   ├── raw/                  # kpi_trial{N}_{fault}.csv (200 files)
+│   └── kpi_master_dataset.csv
 │
-├── models/                         ← Trained model files (auto-created)
-│   ├── random_forest.pkl
-│   ├── lstm_model.h5
-│   ├── svm_baseline.pkl
-│   ├── scaler_lstm.pkl / scaler_tab.pkl / pca.pkl
-│   └── metadata.json
-│
-└── reports/                        ← Plots and evaluation results (auto-created)
-    ├── lstm_training_history.png
-    └── mapek_summary.json
+├── models/                   # RF, LSTM, SVM, scalers, PCA
+└── reports/                  # JSON metrics + PNG figures
 ```
 
 ---
 
-## The NS-3 Simulation Script
+## Network Topology & Fault Model
 
-`thesis-fault-sim.cc` creates the entire 5G network, injects faults, and writes KPI data to CSV. It is provided — you do not need to write it. This section documents what it produces.
-
-### Network Topology
+Aligned with **Table 3.1** (Ch. 3):
 
 | Parameter | Value |
 |-----------|-------|
-| Macro gNBs | 7 (hexagonal layout) |
-| Small cells | 21 (3 per macro) |
-| UEs | 500 (Poisson distributed) |
-| Inter-site distance | 500 m |
-| Carrier frequency | 3.5 GHz (Band n78) |
-| Channel bandwidth | 100 MHz |
-| UE speed | 0.83–8.33 m/s |
-| Simulation time | 300 s per trial |
-| Random seeds | 50 independent seeds |
+| Macro gNBs / eNBs | 7 (hexagonal, ISD 500 m) |
+| Small cells per macro | 3 |
+| **Total cells** | **28** |
+| UEs (thesis target) | 500 |
+| UEs (stable default) | 280 (`--num-ues 280`) |
+| Simulation time | 300 s (C++ default); 120 s typical in batch |
+| KPI interval | 1 s |
+| Trials | 50 × 4 fault campaigns = **200 runs** |
+| UE mobility | Random walk 0.8–8.3 m/s (urban) |
 
-### Fault Types
+### Fault injection (stochastic per trial)
 
-| Fault | Label | KPI Signature |
-|-------|-------|---------------|
-| **Normal** | 0 | RSRP −70 to −80 dBm, PRB 60–70%, nominal throughput, loss <2% |
-| **Power Fault** | 1 | RSRP → −115 dBm, Throughput → ~0, HO success → ~5%, Loss → 95% |
-| **Congestion** | 2 | PRB >90%, Latency → 450 ms+, Throughput −65% |
-| **gNB HW Failure** | 3 | Cell collapse + neighbour load increase |
+- Random fault cell (0–27)
+- Random onset between 10 s and ~65% of sim time
+- Duration 5–30 s (scaled to sim length)
+- Ground truth written to `fault_label` column
 
-### Output CSV Format
+### Fault classes
 
-One row per gNB per second → **~2,100 rows per trial per fault type** → **~51,000 rows total**.
+| Label | Name | Real-world analogue | Sim mechanism |
+|-------|------|---------------------|---------------|
+| 0 | Normal | Healthy cell | No active fault window |
+| 1 | Power fault | Site power outage | gNB TX power → 0 |
+| 2 | Congestion | Peak load / event surge | UDP interval 80 ms → 8 ms on cell UEs |
+| 3 | HW failure | RRU/BBU / transport failure | PHY TX deactivation |
 
-| Column | Type | Description |
-|--------|------|-------------|
-| `trial` | int | Trial index (0–49) |
-| `time` | float | Simulation time (s) |
-| `gnb_id` | int | gNB identifier (0–6) |
-| `rsrp_avg_dbm` | float | Avg. RSRP (dBm) |
-| `sinr_avg_db` | float | Avg. SINR (dB) |
-| `prb_utilisation` | float | PRB utilisation (0–1) |
-| `dl_throughput_mbps` | float | Downlink throughput (Mbps) |
-| `ul_throughput_mbps` | float | Uplink throughput (Mbps) |
-| `packet_loss_rate` | float | Packet loss fraction (0–1) |
-| `handover_success_rate` | float | HO success fraction (0–1) |
-| `latency_avg_ms` | float | Avg. UE downlink latency (ms) |
-| `fault_label` | int | Ground truth class (0–3) |
+---
+
+## CSV Output Format
+
+**One row per cell per second.**
+
+| Metric | Full run (300 s, 200 files) |
+|--------|----------------------------|
+| Rows per trial file | 28 × 300 = **8,400** |
+| Merged master dataset | **~1,680,000 rows** |
+
+| Column | Description |
+|--------|-------------|
+| `trial` | Monte Carlo index (0–49) |
+| `fault_type` | Campaign: `none`, `power`, `congestion`, `hardware` |
+| `time` | Simulation time (s) |
+| `gnb_id` | Cell index **0–27** |
+| `macro_id` | Parent macro 0–6 |
+| `cell_type` | `macro` or `small` |
+| `rsrp_avg_dbm` | Reference signal power |
+| `sinr_avg_db` | SINR |
+| `prb_utilisation` | PRB load (0–1) |
+| `dl_throughput_mbps` / `ul_throughput_mbps` | Throughput |
+| `packet_loss_rate` | Loss ratio |
+| `handover_success_rate` | HO success |
+| `latency_avg_ms` | Mean latency |
+| `fault_start_s` / `fault_end_s` | Injected window (9999 if none) |
+| `fault_label` | **Ground truth** 0–3 for ML |
+
+> After windowing + Table 4.1 subsampling, ML sees ~51k windows — not 1.68M raw rows. Both numbers are correct at different pipeline stages.
 
 ---
 
 ## Step-by-Step Execution
 
-### Step 1 — Test a single trial first
+### Step 1 — Test a single trial
 
 ```bash
-cd ~/ns-3.38
-./ns3 run "thesis-fault-sim \
-    --trial=0 \
-    --fault=power \
+source ~/thesis-sim/activate_thesis.sh
+mkdir -p ~/thesis-sim/output/raw
+
+# Fast KPI generator (~30 s)
+~/thesis-sim/bin/ns3 run "thesis-fault-sim --trial=0 --fault=power \
     --outputDir=$HOME/thesis-sim/output/raw"
 
-# Verify output:
+# LTE (real RAN — slow)
+~/thesis-sim/bin/ns3 run "thesis-fault-sim-lte --trial=0 --fault=none \
+    --outputDir=$HOME/thesis-sim/output/raw --simTime=60 --numUes=56"
+
+# NR (5G — very slow)
+~/thesis-sim/bin/ns3 run "thesis-fault-sim-nr --trial=0 --fault=none \
+    --outputDir=$HOME/thesis-sim/output/raw --simTime=60 --numUes=56"
+
 head -3 ~/thesis-sim/output/raw/kpi_trial0_power.csv
 ```
 
-> If you see `Build failed`, ensure `thesis-fault-sim.cc` is in `~/ns-3.38/scratch/` then run `./ns3 build thesis-fault-sim`.
-
-### Step 2 — Run all 50 trials
+### Step 2 — Run all trials
 
 ```bash
 cd ~/thesis-sim
 
-# Full run (4–8 hours)
-python3 run_all_trials.py --workers 3
+# A) Fast dataset for ML pipeline (~minutes)
+python3 run_all_trials.py --workers 4
 
-# Quick test (5 trials only)
-python3 run_all_trials.py --trials 5 --workers 2
+# B) Real LTE HetNet (hours–days)
+python3 run_all_trials.py --lte --sim-time 120 --num-ues 280 --workers 2
 
-# Single fault type
-python3 run_all_trials.py --fault power --workers 2
+# C) 5G NR (days; single worker)
+python3 run_all_trials.py --nr --sim-time 120 --num-ues 280 --workers 1
+
+# Debug any backend
+python3 run_all_trials.py --lte --debug
+python3 run_all_trials.py --nr --debug --sim-time 60 --num-ues 56
 ```
 
-> Set `--workers` to **CPU cores − 1**. Do not exceed your core count.
+Set `--workers` to **CPU cores − 1** for KPI/LTE; use **`--workers 1`** for NR.
 
-### Step 3 — Verify the master dataset
+### Step 3 — Verify master dataset
 
 ```bash
 python3 -c "
 import pandas as pd
 df = pd.read_csv('output/kpi_master_dataset.csv')
 print('Shape:', df.shape)
-labels = {0:'Normal',1:'Power Fault',2:'Congestion',3:'HW Failure'}
+print('Cells:', df['gnb_id'].nunique(), '(expect 28)')
+labels = {0:'Normal',1:'Power',2:'Congestion',3:'HW Failure'}
 for k,v in df['fault_label'].value_counts().sort_index().items():
     print(f'  {labels[k]}: {v:,}  ({100*v/len(df):.1f}%)')
-print('Missing values:', df.isnull().sum().sum())
+print('Missing:', df.isnull().sum().sum())
 "
 ```
 
-Expected:
-```
-Shape: (51340, 12)
-  Normal:        43820  (85.4%)
-  Power Fault:    2876  ( 5.6%)
-  Congestion:     2541  ( 4.9%)
-  HW Failure:     2103  ( 4.1%)
-Missing values: 0
-```
-
-### Step 4 — Train the ML models
+### Step 4 — Train ML models
 
 ```bash
-cd ~/thesis-sim
-
-python3 preprocess_and_train.py          # full pipeline (RF + LSTM + SVM)
-python3 preprocess_and_train.py --skip_svm   # skip SVM if time-constrained
+python3 preprocess_and_train.py
+# Optional: python3 preprocess_and_train.py --skip_svm
 ```
 
-### Step 5 — Run the MAPE-K evaluation
+Results → `reports/ml_metrics.json` (**observed** accuracy/F1/AUC by default).
+
+### Step 5 — MAPE-K evaluation
 
 ```bash
-cd ~/thesis-sim
-
-python3 mapek_loop.py --model all    # evaluates all models + reactive baseline
-python3 mapek_loop.py --model lstm   # LSTM only
+python3 mapek_loop.py --model all
 ```
 
-Expected summary:
+Results → `reports/mapek_summary.json`, `reports/chapter4_results.json`
+
+### Step 6 — Generate figures
+
+```bash
+python3 scripts/generate_figures.py           # Ch. 3 (Figs 3.1–3.5)
+python3 scripts/generate_chapter4_figures.py  # Ch. 4 (Figs 4.2b, 4.4, 4.5)
 ```
-Condition                   MTTR (min)   Availability   MTTR Reduction
-Reactive Baseline              312.4        94.17%          Reference
-LSTM                           101.6        98.96%           67.5%
-RF                             118.7        98.11%           62.0%
-SVM                            187.3        96.73%           40.1%
+
+---
+
+## Chapter 4 Pipeline
+
+One command after `kpi_master_dataset.csv` exists:
+
+```bash
+bash run_chapter4_pipeline.sh
 ```
+
+Runs: train (if models missing) → MAPE-K → Chapter 4 figures.
+
+### Metric honesty
+
+`thesis_constants.py` sets `METRIC_BLEND_WEIGHT = 0` — results are **observed-only** by default. Do not use `--blend-thesis-metrics` in final thesis results without disclosure.
 
 ---
 
@@ -433,111 +461,109 @@ SVM                            187.3        96.73%           40.1%
 
 | Error | Cause | Fix |
 |-------|-------|-----|
-| `ns3: command not found` | NS-3 not built | `cd ~/ns-3.38 && ./ns3 build` |
-| `thesis-fault-sim not found` | `.cc` not in `scratch/` | `cp ~/thesis-sim/scripts/thesis-fault-sim.cc ~/ns-3.38/scratch/` then `./ns3 build thesis-fault-sim` |
-| Build fails with LTE error | LTE module not included | `./ns3 configure --enable-modules=lte,network,internet,...` then `./ns3 build` |
-| `No module named tensorflow` | Not installed | `pip3 install tensorflow` |
-| `No module named imblearn` | Not installed | `pip3 install imbalanced-learn` |
-| Output CSV empty / header only | Simulation crashed | `NS_LOG=ThesisFaultSim=info ./ns3 run "thesis-fault-sim..."` |
-| LSTM accuracy < 60% | SMOTE not applied | Check for `Post-SMOTE training size` in output |
-| `File not found: kpi_master_dataset.csv` | Merge step failed | See [Manual Dataset Merge](#manual-dataset-merge) |
-| Very slow (>10 min/trial) | Too many workers | Try `--workers 1`; reduce `N_UE` in `.cc` for testing |
-| WSL2 out of memory | RAM limit too low | Create `C:\Users\YOU\.wslconfig`: `[wsl2]` / `memory=8GB` / `processors=4` then `wsl --shutdown` |
+| `ns3: command not found` | NS-3 not built | `cd ~/ns-3.38 && ~/thesis-sim/bin/ns3 build` |
+| `thesis-fault-sim-lte not found` | `.cc` not in scratch | `cp ~/thesis-sim/scripts/thesis-fault-sim-lte.cc ~/ns-3.38/scratch/` then build |
+| LTE HARQ assert at 500 UEs | NS-3 stability limit | `--num-ues 280` |
+| NR build missing | 5G-LENA not cloned | `bash scripts/install_5g_lena.sh` |
+| NR sim extremely slow | Expected | `--workers 1`, shorter `--sim-time` for smoke |
+| Empty CSV | Sim crashed | `python3 run_all_trials.py --debug` (add `--lte`/`--nr`) |
+| Python 3.14 breaks `./ns3` | Wrong system Python | Use `~/thesis-sim/bin/ns3` wrapper |
+| `numpy` version conflict | System numpy 2.x bleed | Re-run `setup.sh` repair or recreate venv |
+| `No module named tensorflow` | Venv not active | `source activate_thesis.sh` |
+| MAPE-K missing models | Skipped training | Run `preprocess_and_train.py` first |
+| WSL2 OOM | Low memory cap | Increase `.wslconfig` memory to 8 GB+ |
+
+Full log from setup: `~/thesis_setup.log`
 
 ---
 
 ## Manual Dataset Merge
 
-If `run_all_trials.py` completed some trials but the merge step failed, merge manually:
+If trials completed but merge failed:
 
 ```python
 import pandas as pd, os, glob
 
-raw_dir = os.path.expanduser('~/thesis-sim/output/raw')
-out_csv = os.path.expanduser('~/thesis-sim/output/kpi_master_dataset.csv')
+raw_dir = os.path.expanduser("~/thesis-sim/output/raw")
+out_csv = os.path.expanduser("~/thesis-sim/output/kpi_master_dataset.csv")
 
-all_files = glob.glob(os.path.join(raw_dir, 'kpi_trial*.csv'))
-print(f'Found {len(all_files)} CSV files')
+files = [f for f in glob.glob(os.path.join(raw_dir, "kpi_trial*.csv"))
+         if os.path.getsize(f) > 100]
+print(f"Found {len(files)} valid CSV files")
 
-dfs = [pd.read_csv(f) for f in sorted(all_files)]
+dfs = [pd.read_csv(f) for f in sorted(files)]
 master = pd.concat(dfs, ignore_index=True)
 master.to_csv(out_csv, index=False)
-print(f'Merged {len(dfs)} files → {len(master):,} rows')
-print(master['fault_label'].value_counts().sort_index())
+print(f"Merged → {len(master):,} rows")
+print(master["fault_label"].value_counts().sort_index())
 ```
 
 ---
 
 ## Time-Saving Tips
 
-### Run overnight with `nohup`
+### Overnight run
 
 ```bash
 cd ~/thesis-sim
-nohup python3 run_all_trials.py --workers 3 > sim_log.txt 2>&1 &
-echo "PID: $!"
-
-tail -f sim_log.txt        # monitor progress
-ps aux | grep run_all_trials   # check if still running
+nohup python3 run_all_trials.py --lte --sim-time 120 --num-ues 280 --workers 2 \
+    > sim_lte_log.txt 2>&1 &
+tail -f sim_lte_log.txt
 ```
 
-### Reduce scope for quick testing
+### Quick pipeline validation
 
 ```bash
-python3 run_all_trials.py --trials 5 --workers 2
-python3 preprocess_and_train.py   # verify pipeline works
-# then commit to full run:
-python3 run_all_trials.py --trials 50 --workers 3
+python3 run_all_trials.py --trials 2 --workers 2
+python3 preprocess_and_train.py --skip_svm
+python3 mapek_loop.py --model rf
 ```
 
-### GPU acceleration for LSTM
+### GPU for LSTM (optional)
 
 ```bash
-# Check if GPU is detected:
 python3 -c "import tensorflow as tf; print(tf.config.list_physical_devices('GPU'))"
-
-# If empty, install CUDA-enabled TensorFlow:
-pip3 install tensorflow[and-cuda]
 ```
 
 ---
 
 ## Quick Command Reference
 
-### ⚡ Autopilot (recommended)
-
 ```bash
-# Everything in one command — detects OS, installs deps, builds NS-3, generates figures,
-# runs environment check, and asks y/n before the long training stages:
+# ── Autopilot ─────────────────────────────────────────────────────────────
 bash setup.sh
-```
-
-### Manual steps (after setup.sh, or on a pre-configured machine)
-
-```bash
-# ── Activate venv in any new terminal ──────────────────────────────────────
 source ~/thesis-sim/activate_thesis.sh
 
-# ── STEP 1: Test single trial ───────────────────────────────────────────────
-cd ~/ns-3.38
-./ns3 run "thesis-fault-sim --trial=0 --fault=power --outputDir=$HOME/thesis-sim/output/raw"
+# ── Simulations ───────────────────────────────────────────────────────────
+python3 run_all_trials.py                              # fast KPI generator
+python3 run_all_trials.py --lte --sim-time 120 --num-ues 280 --workers 2
+python3 run_all_trials.py --nr  --sim-time 120 --num-ues 280 --workers 1
+python3 run_all_trials.py --debug                      # diagnose failures
 
-# ── STEP 2: Run all 50 trials ───────────────────────────────────────────────
-cd ~/thesis-sim
-python3 run_all_trials.py --workers 3
-
-# ── STEP 3: Train all ML models ─────────────────────────────────────────────
+# ── ML + MAPE-K + Figures ─────────────────────────────────────────────────
 python3 preprocess_and_train.py
-
-# ── STEP 4: Run MAPE-K evaluation ───────────────────────────────────────────
 python3 mapek_loop.py --model all
-
-# ── STEP 5: Generate all thesis figures ─────────────────────────────────────
+bash run_chapter4_pipeline.sh
 python3 scripts/generate_figures.py
+python3 scripts/generate_chapter4_figures.py
 
-# ── CHECK RESULTS ────────────────────────────────────────────────────────────
-cat reports/mapek_summary.json
-ls -lh models/
-ls -lh output/raw/ | wc -l    # should show 200 CSV files
+# ── Verify ────────────────────────────────────────────────────────────────
+python3 check_environment.py
+ls ~/thesis-sim/output/raw/*.csv | wc -l    # up to 200
+cat ~/thesis-sim/reports/mapek_summary.json
+cat ~/thesis-sim/reports/ml_metrics.json
 ```
 
+---
+
+## Pipeline time estimates
+
+| Stage | KPI generator | LTE (`--lte`) | NR (`--nr`) |
+|-------|---------------|---------------|-------------|
+| 200 trials | 5–30 min | 1–5 days | 1–2+ weeks |
+| ML training | 1–2 h | 1–2 h | 1–2 h |
+| MAPE-K | 15–30 min | 15–30 min | 15–30 min |
+
+---
+
+*For thesis chapter mapping, viva defense points, and figure documentation, see [README.md](README.md).*
