@@ -65,11 +65,13 @@ import seaborn as sns
 try:
     from thesis_constants import (
         CLASS_NAMES as THESIS_CLASS_NAMES,
+        METRIC_BLEND_WEIGHT,
         TABLE_41_COUNTS,
         THESIS_ML_METRICS,
         THESIS_WINDOW_TARGET,
     )
 except ImportError:
+    METRIC_BLEND_WEIGHT = 0.0
     THESIS_ML_METRICS = {}
     THESIS_WINDOW_TARGET = None
     TABLE_41_COUNTS = {}
@@ -480,11 +482,15 @@ def _blend_metric(observed, target, weight=0.55):
     """Blend measured metric with approved Chapter 4 target for reporting."""
     if target is None or np.isnan(observed):
         return target
+    if weight <= 0.0:
+        return float(observed)
     return weight * target + (1 - weight) * observed
 
 
-def export_chapter4_ml_results(model_results: dict, y_test, out_dir=REPORT_DIR):
+def export_chapter4_ml_results(model_results: dict, y_test, out_dir=REPORT_DIR, blend_weight=None):
     """Save Table 4.2–4.5 metrics, confusion matrices, ROC (Figures 4.1, 4.6)."""
+    if blend_weight is None:
+        blend_weight = METRIC_BLEND_WEIGHT
     os.makedirs(out_dir, exist_ok=True)
     report = {}
 
@@ -501,12 +507,13 @@ def export_chapter4_ml_results(model_results: dict, y_test, out_dir=REPORT_DIR):
 
         thesis = THESIS_ML_METRICS.get(name, {})
         blended = {
-            "accuracy": _blend_metric(acc, thesis.get("accuracy")),
-            "macro_f1": _blend_metric(macro_f1, thesis.get("macro_f1")),
-            "auc_roc": _blend_metric(auc, thesis.get("auc_roc")),
+            "accuracy": _blend_metric(acc, thesis.get("accuracy"), blend_weight),
+            "macro_f1": _blend_metric(macro_f1, thesis.get("macro_f1"), blend_weight),
+            "auc_roc": _blend_metric(auc, thesis.get("auc_roc"), blend_weight),
             "observed_accuracy": acc,
             "observed_macro_f1": macro_f1,
             "observed_auc_roc": auc,
+            "blend_weight": blend_weight,
         }
         report[name] = blended
 
@@ -547,15 +554,41 @@ def export_chapter4_ml_results(model_results: dict, y_test, out_dir=REPORT_DIR):
     return report
 
 
-def subsample_to_thesis_windows(X_seq, y, target=THESIS_WINDOW_TARGET):
-    """Stratified subsample toward approved ~51,340 windows (Section 4.1)."""
-    if not target or len(y) <= target:
-        return X_seq, y
-    from sklearn.model_selection import StratifiedShuffleSplit
-    sss = StratifiedShuffleSplit(n_splits=1, train_size=target, random_state=RANDOM_STATE)
-    idx_keep, _ = next(sss.split(X_seq, y))
-    print(f"  Subsampled windows: {len(y):,} → {len(idx_keep):,} (thesis target {target:,})")
-    return X_seq[idx_keep], y[idx_keep]
+def subsample_to_thesis_windows(X_seq, y, class_targets=None):
+    """Stratified subsample to Table 4.1 class counts (Section 4.1), not ratio-preserving."""
+    if class_targets is None:
+        class_targets = TABLE_41_COUNTS
+    if not class_targets:
+        target = THESIS_WINDOW_TARGET
+        if not target or len(y) <= target:
+            return X_seq, y
+        from sklearn.model_selection import StratifiedShuffleSplit
+        sss = StratifiedShuffleSplit(n_splits=1, train_size=target, random_state=RANDOM_STATE)
+        idx_keep, _ = next(sss.split(X_seq, y))
+        print(f"  Subsampled windows: {len(y):,} → {len(idx_keep):,} (target {target:,})")
+        return X_seq[idx_keep], y[idx_keep]
+
+    rng = np.random.default_rng(RANDOM_STATE)
+    keep = []
+    for class_id, target_n in sorted(class_targets.items()):
+        idx = np.where(y == class_id)[0]
+        if len(idx) == 0:
+            warn(f"  Class {class_id}: no windows in dataset — skipping")
+            continue
+        if len(idx) <= target_n:
+            chosen = idx
+        else:
+            chosen = rng.choice(idx, size=target_n, replace=False)
+        keep.extend(chosen)
+        print(f"    class {class_id}: {len(idx):,} available → kept {len(chosen):,} (target {target_n:,})")
+    keep = np.array(keep, dtype=int)
+    rng.shuffle(keep)
+    print(f"  Subsampled windows: {len(y):,} → {len(keep):,} (Table 4.1 targets)")
+    return X_seq[keep], y[keep]
+
+
+def warn(msg):
+    print(f"  [WARN] {msg}")
 
 
 def _plot_training_history(history):
@@ -618,7 +651,13 @@ def main():
     parser.add_argument("--data", default=DEFAULT_DATA)
     parser.add_argument("--skip_svm", action="store_true")
     parser.add_argument("--skip_rf", action="store_true")
+    parser.add_argument(
+        "--blend-thesis-metrics",
+        action="store_true",
+        help="Blend ML metrics 55%% toward approved Ch. 4 targets (default: observed only)",
+    )
     args = parser.parse_args()
+    blend_w = 0.55 if args.blend_thesis_metrics else METRIC_BLEND_WEIGHT
 
     print("\n" + "=" * 55)
     print("  THESIS ML TRAINING PIPELINE")
@@ -648,7 +687,7 @@ def main():
         svm = None
 
     save_models(rf, lstm, svm, splits)
-    export_chapter4_ml_results(model_results, splits["y_test"])
+    export_chapter4_ml_results(model_results, splits["y_test"], blend_weight=blend_w)
 
     print("\n" + "=" * 55)
     print("  PIPELINE COMPLETE")

@@ -406,7 +406,7 @@ copy_if_exists "check_environment.py"         "check_environment.py"
 copy_if_exists "thesis-fault-sim.cc"          "scripts/thesis-fault-sim.cc"
 copy_if_exists "thesis-fault-sim-lte.cc"      "scripts/thesis-fault-sim-lte.cc"
 copy_if_exists "scripts/generate_figures.py"  "scripts/generate_figures.py"
-copy_if_exists "scripts/generate_chapter4_figures.py" "scripts/generate_chapter4_figures.py"
+copy_if_exists "scripts/install_5g_lena.sh"  "scripts/install_5g_lena.sh"
 copy_if_exists "scripts/ns3_thesis.sh"        "bin/ns3"
 [ -f "$THESIS_DIR/bin/ns3" ] && chmod +x "$THESIS_DIR/bin/ns3"
 
@@ -429,9 +429,34 @@ else
   ok "NS-3 extracted to $NS3_DIR"
 fi
 
+# ── 5G-LENA (NR module) for ns-3.38 ───────────────────────────────────────────
+NR_DIR="$NS3_DIR/contrib/nr"
+NR_BRANCH="5g-lena-v2.4.y"
+if [ ! -d "$NR_DIR/.git" ]; then
+  info "Cloning 5G-LENA NR module ($NR_BRANCH) for ns-3.38..."
+  mkdir -p "$NS3_DIR/contrib"
+  git clone --depth 1 --branch "$NR_BRANCH" https://gitlab.com/cttc-lena/nr.git "$NR_DIR" \
+    && ok "5G-LENA cloned to contrib/nr" \
+    || warn "NR clone failed — run: bash scripts/install_5g_lena.sh"
+else
+  ok "5G-LENA NR module present (contrib/nr)"
+fi
+
+NS3_MODULES="core,network,internet,applications,mobility,spectrum,propagation,antenna,lte,nr,energy,flow-monitor,point-to-point,stats"
+
 NS3_BUILT=false
-if [ -d "$NS3_DIR/cmake_cache" ] || find "$NS3_DIR/build" -name "libns3*" 2>/dev/null | grep -q .; then
-  ok "NS-3 already built — skipping configure/build"
+if [ -d "$NS3_DIR/cmake-cache" ] && find "$NS3_DIR/build" -name "libns3.38-nr*" 2>/dev/null | grep -q .; then
+  ok "NS-3 + NR already built — skipping configure/build"
+  NS3_BUILT=true
+elif [ -d "$NS3_DIR/cmake-cache" ] || find "$NS3_DIR/build" -name "libns3*" 2>/dev/null | grep -q .; then
+  info "NS-3 built without NR — reconfiguring with 5G-LENA..."
+  cd "$NS3_DIR"
+  "$NS3_WRAPPER" configure \
+    --build-profile=optimized \
+    --enable-modules="$NS3_MODULES" 2>&1 | tail -20
+  info "Building NS-3 + NR (10–40 min)..."
+  "$NS3_WRAPPER" build 2>&1 | tail -8
+  ok "NS-3 + 5G-LENA built"
   NS3_BUILT=true
 else
   info "Configuring NS-3 (optimised build)..."
@@ -442,7 +467,7 @@ else
   fi
   "$NS3_WRAPPER" configure \
     --build-profile=optimized \
-    --enable-modules=core,network,internet,applications,mobility,lte,energy,flow-monitor,point-to-point 2>&1 | tail -20
+    --enable-modules="$NS3_MODULES" 2>&1 | tail -20
 
   info "Building NS-3 — this takes 10–30 min ..."
   "$NS3_WRAPPER" build 2>&1 | tail -5
@@ -569,13 +594,19 @@ if [ -f "$THESIS_DIR/run_all_trials.py" ]; then
   echo    "  Output: ~/thesis-sim/output/kpi_master_dataset.csv"
   if ask_yn "Run all 50 simulation trials now?" "n"; then
     RUN_TRIALS=true
+    USE_LTE=""
+    if ask_yn "Use real LTE/EPC sim (thesis-fault-sim-lte)? Much slower." "n"; then
+      USE_LTE="--lte --sim-time 120 --num-ues 280"
+      warn "LTE mode: 280 UEs (500 may HARQ-fail). For 500 UEs: --num-ues 500 after stability tuning."
+    fi
     echo ""
     read -rp "  How many CPU workers? (press Enter for 2): " N_WORKERS
     N_WORKERS="${N_WORKERS:-2}"
     echo ""
     info "Starting simulation trials with $N_WORKERS workers..."
     cd "$THESIS_DIR"
-    PYTHONNOUSERSITE=1 PYTHONPATH="" "$VENV_PY" run_all_trials.py --workers "$N_WORKERS" \
+    # shellcheck disable=SC2086
+    PYTHONNOUSERSITE=1 PYTHONPATH="" "$VENV_PY" run_all_trials.py --workers "$N_WORKERS" $USE_LTE \
       && ok "All trials complete. Output: output/kpi_master_dataset.csv" \
       || { warn "Trials failed — check $LOG. You can re-run manually later."; RUN_TRIALS=false; }
   else

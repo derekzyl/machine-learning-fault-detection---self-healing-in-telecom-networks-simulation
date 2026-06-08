@@ -1027,241 +1027,106 @@ def fig3_3_mapek():
 # =============================================================================
 def fig3_4_timeline():
     """
-    Gantt-style timeline chart for 6 representative trials.
-    Fault parameters are derived from thesis-fault-sim.cc:
-      - SIM_TIME = 300 s
-      - Fault onset: uniform ~ [30, 250] s
-      - Duration:    uniform ~ [15,  45] s
-      - MAPE-K detection delay: MAPEK_CYCLE = 5 s + model inference
-      - Remediation times per fault type from REMEDIATION_POLICY
-    Reproducible random seed matching the NS-3 RNG seed formula (1000 + trial).
+    Gantt-style timeline from actual per-trial CSV fault windows (output/raw/),
+    falling back to parameter-matched synthetic trials if raw files are absent.
     """
-    SIM_TIME = 300
-    MAPEK_CYCLE = 5  # seconds
-    CONF_MEAN = 0.82  # representative mean confidence
-    REMED_TIME = {1: 45, 2: 30, 3: 50}  # from REMEDIATION_POLICY
     FAULT_COLORS = {
-        1: ("#EA4335", "Power Fault"),
-        2: ("#FBBC04", "Congestion"),
-        3: ("#1A73E8", "gNB HW Failure"),
+        "power": ("#EA4335", "Power Fault", 1),
+        "congestion": ("#FBBC04", "Congestion", 2),
+        "hardware": ("#1A73E8", "gNB HW Failure", 3),
     }
-    N_TRIALS = 6  # show 6 representative trials
+    RAW_DIR = os.path.expanduser("~/thesis-sim/output/raw")
+    rows = []
+    if os.path.isdir(RAW_DIR):
+        import pandas as pd
+        for trial_idx in range(6):
+            for fault in ("power", "congestion", "hardware"):
+                path = os.path.join(RAW_DIR, f"kpi_trial{trial_idx}_{fault}.csv")
+                if not os.path.isfile(path) or os.path.getsize(path) < 200:
+                    continue
+                df = pd.read_csv(path, nrows=5000)
+                if "fault_start_s" not in df.columns:
+                    continue
+                fs = df["fault_start_s"].replace(9999, np.nan).dropna()
+                fe = df["fault_end_s"].replace(9999, np.nan).dropna()
+                if fs.empty:
+                    continue
+                onset = float(fs.iloc[0])
+                end = float(fe.iloc[0]) if not fe.empty else onset + 30.0
+                gnb = int(df.loc[df["fault_label"] > 0, "gnb_id"].iloc[0]) if (df["fault_label"] > 0).any() else trial_idx % 28
+                rows.append((trial_idx, fault, onset, end, gnb))
+                break  # one fault type per trial row
+
+    SIM_TIME = 300
+    MAPEK_CYCLE = 5
+    CONF_MEAN = 0.82
+    REMED_TIME = {1: 45, 2: 30, 3: 50}
+    N_TRIALS = max(6, len(rows)) if rows else 6
 
     fig, ax = plt.subplots(figsize=(13, 6))
     fig.patch.set_facecolor(C_BG)
     ax.set_facecolor("white")
-
     yticks, ylabels = [], []
-    rng = np.random.default_rng(1000)  # matches NS-3 seed base
+    rng = np.random.default_rng(1000)
 
-    for trial_idx in range(N_TRIALS):
-        y = N_TRIALS - trial_idx  # top row = Trial 0
-        fault_type = (trial_idx % 3) + 1  # cycle 1→2→3→1…
-        color, fname = FAULT_COLORS[fault_type]
-
-        # Reproduce NS-3 stochastic fault window
-        onset = 30.0 + rng.uniform() * 220.0
-        duration = 15.0 + rng.uniform() * 30.0
-        end = min(onset + duration, SIM_TIME)
-
-        # Detection delay: MAPE-K cycle latency (uniform 1–2 cycles)
-        detect_delay = MAPEK_CYCLE * rng.integers(1, 3)
+    def draw_trial_row(y, fault_type, onset, end, gnb_id, trial_idx, from_data):
+        color, fname, fclass = FAULT_COLORS.get(
+            fault_type, ("#EA4335", fault_type, 1)
+        )
+        detect_delay = MAPEK_CYCLE * (1 if from_data else rng.integers(1, 3))
         detect_t = min(onset + detect_delay, end)
-
-        # Remediation action dispatched at detection; recovery = remed_time × (1 - conf×0.3)
-        remed_s = REMED_TIME[fault_type] * (1.0 - CONF_MEAN * 0.3)
+        remed_s = REMED_TIME.get(fclass, 40) * (1.0 - CONF_MEAN * 0.3)
         restore_t = min(detect_t + remed_s, SIM_TIME)
 
-        # ── Normal (background) ───────────────────────────────────────────
-        ax.barh(
-            y,
-            SIM_TIME,
-            left=0,
-            height=0.55,
-            color="#E8F0FE",
-            edgecolor="#DADCE0",
-            linewidth=0.5,
-            zorder=1,
-        )
-
-        # ── Fault active window ───────────────────────────────────────────
-        ax.barh(
-            y,
-            end - onset,
-            left=onset,
-            height=0.55,
-            color=color,
-            alpha=0.75,
-            edgecolor="white",
-            linewidth=0.8,
-            zorder=2,
-            label=fname if trial_idx < 3 else "",
-        )
-
-        # ── Post-detection recovery zone (lighter shade) ──────────────────
+        ax.barh(y, SIM_TIME, left=0, height=0.55, color="#E8F0FE", edgecolor="#DADCE0",
+                linewidth=0.5, zorder=1)
+        ax.barh(y, end - onset, left=onset, height=0.55, color=color, alpha=0.75,
+                edgecolor="white", linewidth=0.8, zorder=2,
+                label=fname if trial_idx < 3 else "")
         if detect_t < end:
-            ax.barh(
-                y,
-                restore_t - detect_t,
-                left=detect_t,
-                height=0.55,
-                color=color,
-                alpha=0.30,
-                zorder=3,
-                hatch="////",
-                edgecolor="white",
-                linewidth=0,
-            )
-
-        # ── Fault onset marker ────────────────────────────────────────────
-        ax.plot(
-            onset,
-            y,
-            marker="|",
-            markersize=14,
-            color=color,
-            markeredgewidth=2.5,
-            zorder=5,
-        )
-        ax.text(
-            onset,
-            y + 0.36,
-            f"t={onset:.0f}s",
-            ha="center",
-            va="bottom",
-            fontsize=7,
-            color=color,
-            fontweight="bold",
-        )
-
-        # ── MAPE-K detection marker ───────────────────────────────────────
-        ax.plot(
-            detect_t,
-            y,
-            marker="D",
-            markersize=7,
-            color="#8430CE",
-            zorder=6,
-            markeredgecolor="white",
-            markeredgewidth=1.0,
-        )
-        ax.annotate(
-            f"Detect\nt={detect_t:.0f}s",
-            xy=(detect_t, y),
-            xytext=(detect_t + 4, y - 0.42),
-            fontsize=6.5,
-            color="#6A0DAD",
-            arrowprops=dict(arrowstyle="->", color="#8430CE", lw=0.9),
-        )
-
-        # ── Restore marker ────────────────────────────────────────────────
-        ax.plot(
-            restore_t,
-            y,
-            marker="*",
-            markersize=11,
-            color="#34A853",
-            zorder=6,
-            markeredgecolor="white",
-            markeredgewidth=0.8,
-        )
-        ax.text(
-            restore_t + 1,
-            y + 0.36,
-            f"Restore\nt={restore_t:.0f}s",
-            ha="left",
-            va="bottom",
-            fontsize=6.5,
-            color="#34A853",
-        )
-
-        # ── MTTR brace ────────────────────────────────────────────────────
+            ax.barh(y, restore_t - detect_t, left=detect_t, height=0.55, color=color,
+                    alpha=0.30, zorder=3, hatch="////", edgecolor="white", linewidth=0)
+        ax.plot(onset, y, marker="|", markersize=14, color=color, markeredgewidth=2.5, zorder=5)
+        ax.text(onset, y + 0.36, f"t={onset:.0f}s", ha="center", va="bottom", fontsize=7,
+                color=color, fontweight="bold")
+        ax.plot(detect_t, y, marker="D", markersize=7, color="#8430CE", zorder=6,
+                markeredgecolor="white", markeredgewidth=1.0)
+        ax.plot(restore_t, y, marker="*", markersize=11, color="#34A853", zorder=6,
+                markeredgecolor="white", markeredgewidth=0.8)
         mttr = restore_t - onset
-        ax.annotate(
-            "",
-            xy=(restore_t, y - 0.38),
-            xytext=(onset, y - 0.38),
-            arrowprops=dict(arrowstyle="<->", color="#5F6368", lw=1.0),
-        )
-        ax.text(
-            (onset + restore_t) / 2,
-            y - 0.48,
-            f"MTTR≈{mttr:.0f}s",
-            ha="center",
-            va="top",
-            fontsize=6.5,
-            color="#5F6368",
-            style="italic",
-        )
-
+        ax.text((onset + restore_t) / 2, y - 0.48, f"MTTR≈{mttr:.0f}s", ha="center",
+                va="top", fontsize=6.5, color="#5F6368", style="italic")
+        src = "measured" if from_data else "synthetic"
         yticks.append(y)
-        ylabels.append(f"Trial {trial_idx}  |  {fname}  |  gNB {trial_idx % 7}")
+        ylabels.append(f"Trial {trial_idx}  |  {fname}  |  gNB {gnb_id}  ({src})")
 
-    # ── Phase labels at top ───────────────────────────────────────────────────
-    for t, lbl in [(0, "Normal"), (150, "Normal"), (SIM_TIME, "")]:
+    if rows:
+        for i, (trial_idx, fault, onset, end, gnb) in enumerate(rows[:6]):
+            draw_trial_row(6 - i, fault, onset, end, gnb, trial_idx, True)
+        title_suffix = "fault windows from output/raw/ CSVs"
+    else:
+        for trial_idx in range(6):
+            y = 6 - trial_idx
+            fault_type = (trial_idx % 3) + 1
+            fault_name = {1: "power", 2: "congestion", 3: "hardware"}[fault_type]
+            onset = 30.0 + rng.uniform() * 220.0
+            end = min(onset + 15.0 + rng.uniform() * 30.0, SIM_TIME)
+            draw_trial_row(y, fault_name, onset, end, trial_idx % 7, trial_idx, False)
+        title_suffix = "synthetic fallback (no raw CSVs)"
+
+    for t in (0, 150, SIM_TIME):
         ax.axvline(t, color=C_BORDER, lw=0.8, linestyle=":")
-
-    # ── Formatting ────────────────────────────────────────────────────────────
     ax.set_xlim(0, SIM_TIME)
-    ax.set_ylim(0.2, N_TRIALS + 0.8)
+    ax.set_ylim(0.2, 7)
     ax.set_xlabel("Simulation Time (seconds)", fontsize=10)
     ax.set_yticks(yticks)
     ax.set_yticklabels(ylabels, fontsize=8.5)
     ax.set_xticks(range(0, SIM_TIME + 1, 30))
-    ax.tick_params(axis="x", labelsize=8.5)
-    ax.spines["top"].set_visible(False)
-    ax.spines["right"].set_visible(False)
-    ax.spines["left"].set_visible(False)
     ax.grid(axis="x", color=C_BORDER, lw=0.6, alpha=0.7)
-
-    # ── Legend ────────────────────────────────────────────────────────────────
-    legend_patches = [
-        mpatches.Patch(color="#EA4335", alpha=0.75, label="Power Fault (class 1)"),
-        mpatches.Patch(color="#FBBC04", alpha=0.75, label="Congestion (class 2)"),
-        mpatches.Patch(color="#1A73E8", alpha=0.75, label="gNB HW Failure (class 3)"),
-        mpatches.Patch(
-            facecolor="white",
-            edgecolor="#5F6368",
-            hatch="////",
-            label="Detection → Recovery window",
-        ),
-        Line2D(
-            [0],
-            [0],
-            marker="D",
-            color="w",
-            markerfacecolor="#8430CE",
-            markersize=8,
-            label="MAPE-K Detection point",
-        ),
-        Line2D(
-            [0],
-            [0],
-            marker="*",
-            color="w",
-            markerfacecolor="#34A853",
-            markersize=10,
-            label="Restoration point",
-        ),
-    ]
-    ax.legend(
-        handles=legend_patches,
-        loc="upper right",
-        fontsize=7.8,
-        framealpha=0.93,
-        edgecolor=C_BORDER,
-        ncol=2,
-    )
-
     ax.set_title(
-        "Figure 3.4 — Representative Fault Injection Timeline Across 6 Simulation Trials\n"
-        "(300 s window · stochastic onset [30–250 s] · duration [15–45 s] · MAPE-K cycle = 5 s)",
-        fontsize=11,
-        fontweight="bold",
-        pad=12,
-        color="#202124",
+        f"Figure 3.4 — Fault Injection Timeline ({title_suffix})",
+        fontsize=11, fontweight="bold", pad=12, color="#202124",
     )
-
     plt.tight_layout()
     out = os.path.join(REPORT_DIR, "fig3_4_timeline.png")
     plt.savefig(out, dpi=180, bbox_inches="tight", facecolor=C_BG)

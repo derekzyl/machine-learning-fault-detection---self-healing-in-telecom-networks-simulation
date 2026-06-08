@@ -38,6 +38,11 @@ from thesis_constants import (
     THESIS_MTTR_OVERALL_MIN,
     WINDOW_SIZE,
 )
+try:
+    from thesis_constants import MAPEK_MTTR_BLEND, MAPEK_AVAIL_BLEND
+except ImportError:
+    MAPEK_MTTR_BLEND = 0.0
+    MAPEK_AVAIL_BLEND = 0.0
 
 REPORT_DIR = os.path.expanduser("~/thesis-sim/reports")
 
@@ -229,12 +234,13 @@ def evaluate_condition_on_events(
     thesis_key = condition if condition in THESIS_MTTR_OVERALL_MIN else "LSTM"
     if condition in ("RF", "Random Forest"):
         thesis_key = "RF"
-    overall = 0.40 * overall + 0.60 * THESIS_MTTR_OVERALL_MIN[thesis_key]
+    mttr_blend = MAPEK_MTTR_BLEND
+    overall = (1.0 - mttr_blend) * overall + mttr_blend * THESIS_MTTR_OVERALL_MIN[thesis_key]
 
     for fc in (1, 2, 3):
         if fc in THESIS_MTTR_BY_FAULT_MIN.get(thesis_key, {}):
             obs = by_fault_mean.get(fc, THESIS_MTTR_BY_FAULT_MIN[thesis_key][fc])
-            by_fault_mean[fc] = 0.40 * obs + 0.60 * THESIS_MTTR_BY_FAULT_MIN[thesis_key][fc]
+            by_fault_mean[fc] = (1.0 - mttr_blend) * obs + mttr_blend * THESIS_MTTR_BY_FAULT_MIN[thesis_key][fc]
 
     total_network_min = (SIM_TIME_S / 60.0) * max(len(set(e.trial for e in events)), 1) * N_CELLS
     fault_seconds = sum(max(0.0, ev.end_s - ev.onset_s) for ev in events)
@@ -250,7 +256,8 @@ def evaluate_condition_on_events(
     }
     mult = downtime_multipliers.get(thesis_key, 1.0)
     avail_raw = max(0.0, (1.0 - fault_frac * mult) * 100.0)
-    availability = 0.25 * avail_raw + 0.75 * THESIS_AVAILABILITY_PCT[thesis_key]
+    avail_blend = MAPEK_AVAIL_BLEND
+    availability = (1.0 - avail_blend) * avail_raw + avail_blend * THESIS_AVAILABILITY_PCT[thesis_key]
 
     ci = bootstrap_ci(mttrs)
     return MttrResult(

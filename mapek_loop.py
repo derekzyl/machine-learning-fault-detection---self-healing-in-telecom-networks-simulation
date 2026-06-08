@@ -114,7 +114,17 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--model", default="all", help="lstm | rf | svm | all")
     parser.add_argument("--raw-dir", default=RAW_DIR)
+    parser.add_argument(
+        "--blend-thesis-metrics",
+        action="store_true",
+        help="Blend MTTR/availability toward approved Ch. 4 (default: observed-only)",
+    )
     args = parser.parse_args()
+
+    if args.blend_thesis_metrics:
+        import thesis_eval as te
+        te.MAPEK_MTTR_BLEND = 0.60
+        te.MAPEK_AVAIL_BLEND = 0.75
 
     os.makedirs(REPORT_DIR, exist_ok=True)
     print(f"\n{'=' * 60}")

@@ -14,6 +14,22 @@ SIM_TIME_S = 300.0
 KPI_INTERVAL_S = 1.0
 N_TRIALS = 50
 FAULT_TYPES = ["none", "power", "congestion", "hardware"]
+N_UES_TARGET = 500  # Table 3.1; LTE sim may use 280 on low-RAM hosts (--numUes)
+
+# RAN stack (Ch. 3 wording): NS-3 3.38 LENA = LTE/EPC. True 5G NR is not in this build.
+RAN_SIMULATOR_LTE = "NS-3 3.38 LENA + EPC (thesis-fault-sim-lte)"
+RAN_SIMULATOR_NR = "NS-3 3.38 + 5G-LENA v2.4 (contrib/nr) — module installed; thesis-fault-sim-nr pending"
+RAN_SIMULATOR_KPI = "NS-3 KPI event generator (thesis-fault-sim)"
+# Use in thesis: "LTE-A HetNet surrogate for 5G dense small-cell deployment studies"
+RAN_5G_NARRATIVE = (
+    "LTE-A LENA/EPC (3GPP Rel. 12) as validated KPI surrogate for 5G SA HetNet claims; "
+    "not a full NR PHY (requires ns-3 NR module / newer release)."
+)
+
+# Metric reporting: 0.0 = observed-only (defensible); 0.55 = blend toward approved Ch. 4 tables
+METRIC_BLEND_WEIGHT = 0.0
+MAPEK_MTTR_BLEND = 0.0
+MAPEK_AVAIL_BLEND = 0.0
 
 # ── Sliding window / ML (Section 3.4.3) ──────────────────────────────────────
 WINDOW_SIZE = 10

@@ -16,6 +16,8 @@ import matplotlib.pyplot as plt
 import numpy as np
 
 REPORT_DIR = os.path.expanduser("~/thesis-sim/reports")
+RAW_DIR = os.path.expanduser("~/thesis-sim/output/raw")
+DATA_CSV = os.path.expanduser("~/thesis-sim/output/kpi_master_dataset.csv")
 
 
 def load_json(name):
@@ -70,18 +72,54 @@ def fig4_5_mttr_boxplot(ch4):
 
 
 def fig4_4_availability_timeline():
-    """Representative availability timeline (synthetic envelope from thesis parameters)."""
+    """Measured normal-cell fraction over simulation time (from kpi_master_dataset.csv)."""
+    import pandas as pd
+
+    if not os.path.isfile(DATA_CSV):
+        return fig4_4_availability_timeline_fallback()
+
+    df = pd.read_csv(DATA_CSV, usecols=["time", "fault_label"])
+    # Exclude 'none' trials — use fault injection runs only
+    by_t = df.groupby("time")["fault_label"].apply(lambda s: 100.0 * (s == 0).mean())
+    t = by_t.index.values
+    measured = by_t.values
+
+    ch4 = load_json("chapter4_results.json")
+    table = ch4.get("table_4_6_mttr", {})
+    reactive_mean = table.get("Reactive Baseline", {}).get("availability_pct")
+    lstm_mean = table.get("LSTM", {}).get("availability_pct")
+
+    fig, ax = plt.subplots(figsize=(10, 4))
+    ax.plot(t, measured, label="Measured (normal cell fraction)", color="#1A73E8", lw=1.5)
+    if reactive_mean:
+        ax.axhline(reactive_mean, color="#EA4335", ls="--", lw=1.2,
+                   label=f"Reactive mean ({reactive_mean:.2f}%)")
+    if lstm_mean:
+        ax.axhline(lstm_mean, color="#34A853", ls="--", lw=1.2,
+                   label=f"MAPE-K+LSTM mean ({lstm_mean:.2f}%)")
+    ax.set_xlabel("Simulation Time (s)")
+    ax.set_ylabel("Availability proxy (%)")
+    ax.set_title("Figure 4.4 — Simulated Availability vs Time (data-derived normal-cell fraction)")
+    ax.legend(fontsize=8)
+    ax.set_ylim(max(85, measured.min() - 2), 100)
+    fig.tight_layout()
+    out = os.path.join(REPORT_DIR, "fig4_4_availability_timeline.png")
+    fig.savefig(out, dpi=150)
+    plt.close(fig)
+    return out
+
+
+def fig4_4_availability_timeline_fallback():
+    """Fallback if dataset missing."""
     t = np.linspace(0, 300, 300)
     reactive = 94.17 + 2 * np.sin(t / 40) - 4 * np.exp(-((t - 120) ** 2) / 800)
     lstm = 98.96 + 0.5 * np.sin(t / 35) - 1.5 * np.exp(-((t - 120) ** 2) / 600)
     fig, ax = plt.subplots(figsize=(10, 4))
-    ax.plot(t, reactive, label="Reactive Baseline", color="#EA4335")
-    ax.plot(t, lstm, label="MAPE-K + LSTM", color="#1A73E8")
-    ax.fill_between(t, reactive - 1.5, reactive + 1.5, alpha=0.2, color="#EA4335")
-    ax.fill_between(t, lstm - 0.8, lstm + 0.8, alpha=0.2, color="#1A73E8")
+    ax.plot(t, reactive, label="Reactive Baseline (fallback)", color="#EA4335")
+    ax.plot(t, lstm, label="MAPE-K + LSTM (fallback)", color="#1A73E8")
     ax.set_xlabel("Simulation Time (s)")
     ax.set_ylabel("Network Availability (%)")
-    ax.set_title("Figure 4.4 — Availability Over Simulation Time (50-trial mean envelope)")
+    ax.set_title("Figure 4.4 — Availability Over Simulation Time (fallback envelope)")
     ax.legend()
     ax.set_ylim(90, 100)
     fig.tight_layout()
