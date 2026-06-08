@@ -35,9 +35,12 @@ header() { echo -e "\n${BOLD}${BLUE}══ $* ══${NC}"; }
 die()    { error "$*"; exit 1; }
 
 # ── paths ─────────────────────────────────────────────────────────────────────
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 THESIS_DIR="$HOME/thesis-sim"
 VENV_DIR="$THESIS_DIR/venv"
 VENV_PY="$VENV_DIR/bin/python"
+THESIS_BIN="$THESIS_DIR/bin"
+NS3_WRAPPER="$THESIS_BIN/ns3"
 NS3_DIR="$HOME/ns-3.38"
 NS3_ARCHIVE="ns-allinone-3.38.tar.bz2"
 NS3_URL="https://www.nsnam.org/releases/${NS3_ARCHIVE}"
@@ -352,15 +355,34 @@ print(f'  numpy {ver} — venv isolated OK ({loc})')
 "
 ok "Python packages installed and isolated"
 
+# NS-3 3.38 ./ns3 breaks on Python 3.14 (argparse store_true on positionals).
+install_ns3_wrapper() {
+  mkdir -p "$THESIS_BIN"
+  if [ -f "$SCRIPT_DIR/scripts/ns3_thesis.sh" ]; then
+    cp "$SCRIPT_DIR/scripts/ns3_thesis.sh" "$NS3_WRAPPER"
+  else
+    cat > "$NS3_WRAPPER" << 'NS3WRAP'
+#!/usr/bin/env bash
+set -euo pipefail
+NS3_DIR="${NS3_DIR:-$HOME/ns-3.38}"
+VENV_PY="${VENV_PY:-$HOME/thesis-sim/venv/bin/python}"
+cd "$NS3_DIR"
+exec "$VENV_PY" ./ns3 "$@"
+NS3WRAP
+  fi
+  chmod +x "$NS3_WRAPPER"
+}
+install_ns3_wrapper
+ok "NS-3 wrapper installed ($NS3_WRAPPER — uses venv Python, not system python3)"
+
 # ─────────────────────────────────────────────────────────────────────────────
 # STEP 4 — PROJECT DIRECTORY STRUCTURE
 # ─────────────────────────────────────────────────────────────────────────────
 _LAST_STEP="Project files"
 header "STEP 4 — Project directory + file placement"
 
-mkdir -p "$THESIS_DIR"/{output/raw,models,reports,scripts}
+mkdir -p "$THESIS_DIR"/{bin,output/raw,models,reports,scripts}
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 info "Source dir: $SCRIPT_DIR"
 
 copy_if_exists() {
@@ -374,12 +396,19 @@ copy_if_exists() {
   fi
 }
 
+copy_if_exists "run_chapter4_pipeline.sh"        "run_chapter4_pipeline.sh"
+copy_if_exists "thesis_constants.py"            "thesis_constants.py"
+copy_if_exists "thesis_eval.py"                 "thesis_eval.py"
 copy_if_exists "run_all_trials.py"            "run_all_trials.py"
 copy_if_exists "preprocess_and_train.py"      "preprocess_and_train.py"
 copy_if_exists "mapek_loop.py"                "mapek_loop.py"
 copy_if_exists "check_environment.py"         "check_environment.py"
 copy_if_exists "thesis-fault-sim.cc"          "scripts/thesis-fault-sim.cc"
+copy_if_exists "thesis-fault-sim-lte.cc"      "scripts/thesis-fault-sim-lte.cc"
 copy_if_exists "scripts/generate_figures.py"  "scripts/generate_figures.py"
+copy_if_exists "scripts/generate_chapter4_figures.py" "scripts/generate_chapter4_figures.py"
+copy_if_exists "scripts/ns3_thesis.sh"        "bin/ns3"
+[ -f "$THESIS_DIR/bin/ns3" ] && chmod +x "$THESIS_DIR/bin/ns3"
 
 # ─────────────────────────────────────────────────────────────────────────────
 # STEP 5 — NS-3 3.38
@@ -411,12 +440,12 @@ else
     export PKG_CONFIG_PATH="$(brew --prefix openssl@3)/lib/pkgconfig:$(brew --prefix libxml2)/lib/pkgconfig"
     export CPPFLAGS="-I$(brew --prefix openssl@3)/include"
   fi
-  ./ns3 configure \
+  "$NS3_WRAPPER" configure \
     --build-profile=optimized \
-    --enable-modules=core,network,internet,applications,mobility 2>&1 | tail -20
+    --enable-modules=core,network,internet,applications,mobility,lte,energy,flow-monitor,point-to-point 2>&1 | tail -20
 
   info "Building NS-3 — this takes 10–30 min ..."
-  ./ns3 build 2>&1 | tail -5
+  "$NS3_WRAPPER" build 2>&1 | tail -5
   ok "NS-3 built"
   NS3_BUILT=true
 fi
@@ -432,9 +461,18 @@ SCRATCH_CC="$NS3_DIR/scratch/thesis-fault-sim.cc"
 
 if [ -f "$SIM_CC" ]; then
   cp "$SIM_CC" "$SCRATCH_CC"
-  cd "$NS3_DIR"
-  ./ns3 build thesis-fault-sim 2>&1 | tail -5
-  ok "thesis-fault-sim compiled"
+  "$NS3_WRAPPER" build thesis-fault-sim 2>&1 | tail -5
+  ok "thesis-fault-sim compiled (28-cell KPI generator)"
+
+  LTE_CC="$THESIS_DIR/scripts/thesis-fault-sim-lte.cc"
+  LTE_SCRATCH="$NS3_DIR/scratch/thesis-fault-sim-lte.cc"
+  if [ -f "$LTE_CC" ]; then
+    cp "$LTE_CC" "$LTE_SCRATCH"
+    info "Building thesis-fault-sim-lte (real LTE/EPC — Phase 1)..."
+    "$NS3_WRAPPER" build thesis-fault-sim-lte 2>&1 | tail -8
+    ok "thesis-fault-sim-lte compiled (28 eNB HetNet, 500 UE, LENA + EPC)"
+    info "LTE trials: python3 run_all_trials.py --lte --workers 2"
+  fi
 else
   warn "thesis-fault-sim.cc not found — skipping compile"
   warn "Place it in $THESIS_DIR/scripts/ and re-run to compile"
@@ -453,7 +491,7 @@ cat > "$THESIS_DIR/activate_thesis.sh" << 'ACTIVATE'
 
 unset PYTHONPATH
 export PYTHONNOUSERSITE=1
-export PATH="$HOME/.cargo/bin:$HOME/.local/bin:$PATH"
+export PATH="$HOME/thesis-sim/bin:$HOME/.cargo/bin:$HOME/.local/bin:$PATH"
 source "$HOME/thesis-sim/venv/bin/activate"
 
 VENV_PY="$HOME/thesis-sim/venv/bin/python"
@@ -472,6 +510,7 @@ echo "    python3 run_all_trials.py --workers 3"
 echo "    python3 preprocess_and_train.py"
 echo "    python3 mapek_loop.py --model all"
 echo "    python3 scripts/generate_figures.py"
+echo "    python3 scripts/generate_chapter4_figures.py"
 echo ""
 ACTIVATE
 chmod +x "$THESIS_DIR/activate_thesis.sh"
@@ -593,16 +632,41 @@ if [ -f "$THESIS_DIR/mapek_loop.py" ]; then
     warn "  Run Step B first, then: python3 mapek_loop.py --model all"
   else
     if ask_yn "Run MAPE-K evaluation now?" "n"; then
+      RUN_MAPEK=true
       echo ""
       info "Running MAPE-K evaluation (all models + reactive baseline)..."
       cd "$THESIS_DIR"
-      PYTHONNOUSERSITE=1 PYTHONPATH="" "$VENV_PY" mapek_loop.py --model all \
+      PYTHONNOUSERSITE=1 PYTHONPATH="$THESIS_DIR" "$VENV_PY" mapek_loop.py --model all \
         && ok "MAPE-K evaluation complete — results in reports/mapek_summary.json" \
-        || warn "MAPE-K failed — check $LOG. Re-run: python3 mapek_loop.py --model all"
+        || { warn "MAPE-K failed — check $LOG. Re-run: python3 mapek_loop.py --model all"; RUN_MAPEK=false; }
     else
+      RUN_MAPEK=false
       echo "  Skipped. Run manually:"
       echo "    python3 mapek_loop.py --model all"
     fi
+  fi
+fi
+
+# ── 10d: Chapter 4 figures ────────────────────────────────────────────────────
+RUN_MAPEK="${RUN_MAPEK:-false}"
+CH4_SCRIPT="$THESIS_DIR/scripts/generate_chapter4_figures.py"
+if [ -f "$CH4_SCRIPT" ]; then
+  echo ""
+  echo -e "  ${BOLD}Step D — Chapter 4 result figures (Tables 4.6 / Figs 4.2b–4.5)${NC}"
+  echo    "  Requires: reports/mapek_summary.json (Step C) or existing results."
+  echo    "  Estimated time: < 1 minute."
+  if [ -f "$THESIS_DIR/reports/mapek_summary.json" ] || [ "$RUN_MAPEK" = true ]; then
+    if ask_yn "Generate Chapter 4 figures now?" "y"; then
+      cd "$THESIS_DIR"
+      PYTHONNOUSERSITE=1 PYTHONPATH="$THESIS_DIR" "$VENV_PY" "$CH4_SCRIPT" \
+        && ok "Chapter 4 figures saved to reports/" \
+        || warn "Chapter 4 figure generation failed — check $LOG"
+    else
+      echo "  Skipped. Run manually:"
+      echo "    python3 scripts/generate_chapter4_figures.py"
+    fi
+  else
+    warn "  No MAPE-K results yet — run Step C first, then generate_chapter4_figures.py"
   fi
 fi
 
@@ -634,7 +698,9 @@ print(f'  matplotlib:       {ver(\"matplotlib\")}')
 
 echo ""
 info "Generated figures (in reports/):"
-for f in fig3_1_topology fig3_2_pipeline fig3_3_mapek fig3_4_timeline fig3_5_lstm_arch; do
+for f in fig3_1_topology fig3_2_pipeline fig3_3_mapek fig3_4_timeline fig3_5_lstm_arch \
+         fig4_1_roc_curves fig4_2b_availability fig4_4_availability_timeline \
+         fig4_5_mttr_comparison fig4_6_confusion_matrices; do
   fp="$THESIS_DIR/reports/${f}.png"
   if [ -f "$fp" ]; then
     size=$(du -h "$fp" | cut -f1)
@@ -656,7 +722,8 @@ echo "  Full execution order (run these after activating):"
 echo "    1. python3 run_all_trials.py --workers 3    # 4–8 hours"
 echo "    2. python3 preprocess_and_train.py          # 1–2 hours"
 echo "    3. python3 mapek_loop.py --model all        # 15–30 min"
-echo "    4. python3 scripts/generate_figures.py      # 30 sec"
+echo "    4. python3 scripts/generate_chapter4_figures.py  # 30 sec"
+echo "    5. python3 scripts/generate_figures.py      # 30 sec (Ch. 3 diagrams)"
 echo ""
 echo "  Full log: $LOG"
 echo ""

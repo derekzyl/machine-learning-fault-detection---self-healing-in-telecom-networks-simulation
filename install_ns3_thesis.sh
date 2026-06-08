@@ -13,6 +13,25 @@ THESIS_DIR="$HOME/thesis-sim"
 NS3_DIR="$HOME/ns-3.38"
 VENV_DIR="$THESIS_DIR/venv"
 VENV_PY="$VENV_DIR/bin/python"
+THESIS_BIN="$THESIS_DIR/bin"
+NS3_WRAPPER="$THESIS_BIN/ns3"
+
+mkdir -p "$THESIS_BIN"
+if [ -f "$THESIS_DIR/scripts/ns3_thesis.sh" ]; then
+    cp "$THESIS_DIR/scripts/ns3_thesis.sh" "$NS3_WRAPPER"
+elif [ -f "$(dirname "$0")/scripts/ns3_thesis.sh" ]; then
+    cp "$(dirname "$0")/scripts/ns3_thesis.sh" "$NS3_WRAPPER"
+else
+    cat > "$NS3_WRAPPER" << 'NS3WRAP'
+#!/usr/bin/env bash
+set -euo pipefail
+NS3_DIR="${NS3_DIR:-$HOME/ns-3.38}"
+VENV_PY="${VENV_PY:-$HOME/thesis-sim/venv/bin/python}"
+cd "$NS3_DIR"
+exec "$VENV_PY" ./ns3 "$@"
+NS3WRAP
+fi
+chmod +x "$NS3_WRAPPER"
 
 echo ""
 echo "============================================================"
@@ -81,10 +100,10 @@ if [ -f "$NS3_DIR/build/lib/libns3.38-lte-optimized.so" ] || \
 else
     cd "$NS3_DIR"
     export PYTHON="$VENV_PY"
-    ./ns3 configure \
+    "$NS3_WRAPPER" configure \
         --build-profile=optimized \
         --enable-modules=lte,network,internet,applications,mobility,energy,flow-monitor,point-to-point
-    ./ns3 build
+    "$NS3_WRAPPER" build
     echo "  NS-3 build complete."
 fi
 
@@ -93,10 +112,9 @@ echo ""
 echo "[6/6] Thesis simulation script..."
 if [ -f "$THESIS_DIR/scripts/thesis-fault-sim.cc" ]; then
     cp "$THESIS_DIR/scripts/thesis-fault-sim.cc" "$NS3_DIR/scratch/"
-    cd "$NS3_DIR"
-    ./ns3 build thesis-fault-sim
+    "$NS3_WRAPPER" build thesis-fault-sim
     echo "  Compiled."
-    ./ns3 run "thesis-fault-sim --trial=0 --fault=power --outputDir=$THESIS_DIR/output/raw" 2>&1 | tail -3
+    "$NS3_WRAPPER" run "thesis-fault-sim --trial=0 --fault=power --outputDir=$THESIS_DIR/output/raw" 2>&1 | tail -3
 else
     echo "  Place thesis-fault-sim.cc in $THESIS_DIR/scripts/ then re-run."
 fi
